@@ -35,7 +35,7 @@
 </head>
 <body>
   <div class="note">
-    <div><strong>Model Viewer</strong></div>
+    <div><strong>UMB Technovator Model Viewer</strong></div>
     <div class="muted">Load a .glb, browser must support WebXR (HTTPS or <code>http://localhost</code>).</div>
     <div class="row">
       <button id="enter-vr" class="btn" disabled>Enter VR</button>
@@ -45,8 +45,9 @@
 
   <canvas id="renderCanvas"></canvas>
 
+  <!-- THIS SECTION CONTAINS THE ENGINE OF THE MODEL VIEWING CODE -->
   <script>
-    // ---- Configure your asset here ----
+      // ---- Asset selection ----
     const MODEL_PATH = "./3D_Models/"; // e.g., "./3D_Models/"
     const MODEL_FILE = "maxwell.glb";  // e.g., "Maxwell.glb" (case-sensitive on many hosts)
 
@@ -194,5 +195,7 @@
       window.addEventListener("resize", () => engine.resize());
     })();
   </script>
+<!-- THIS SECTION CONTAINS THE ENGINE OF THE MODEL VIEWING CODE -->
+
 </body>
 </html>
