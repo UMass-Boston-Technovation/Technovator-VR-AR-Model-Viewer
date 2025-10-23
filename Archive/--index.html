@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Babylon.js AR/VR Model Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Babylon core + loader -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <!-- (Optional) GUI if you want on-screen buttons later -->
+  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; background:#111; }
+    #renderCanvas { width: 100%; height: 100%; touch-action: none; display:block; }
+    .note {
+      position: absolute; left: 12px; top: 12px; z-index: 2;
+      background: rgba(255,255,255,.95); padding: 6px 10px; border-radius: 6px; font: 14px/1.4 system-ui, Arial, sans-serif;
+    }
+    .controls {
+      position: absolute; right: 12px; top: 12px; z-index: 3; display: flex; gap: 8px;
+    }
+    .btn {
+      background: rgba(255,255,255,0.95); border: none; padding: 8px 10px; border-radius: 8px; font-weight: 600; cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+    }
+    .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div id="hint" class="note">Tip: place one or more .glb files inside the <code>3D_Models/</code> folder and update the filename inside the script if necessary.</div>
+  <div class="controls" id="controls">
+    <button id="enter-vr" class="btn" disabled>Enter VR</button>
+    <button id="enter-ar" class="btn" disabled>Enter AR</button>
+  </div>
+  <canvas id="renderCanvas"></canvas>
+
+  <script>
+  const canvas = document.getElementById("renderCanvas");
+  const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+  const btnVR = document.getElementById('enter-vr');
+  const btnAR = document.getElementById('enter-ar');
+
+    const createScene = async () => {
+      const scene = new BABYLON.Scene(engine);
+      scene.createDefaultEnvironment({
+        enableGroundShadow: true,
+        groundYBias: 0.01
+      });
+
+      // Camera
+      const camera = new BABYLON.ArcRotateCamera("cam",
+        BABYLON.Tools.ToRadians(135), BABYLON.Tools.ToRadians(60),
+        3.5, BABYLON.Vector3.Zero(), scene);
+      camera.attachControl(canvas, true);
+
+      // Light
+      const light = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+      light.intensity = 0.9;
+
+      // Load your GLB
+      // Put your model at /3D_Models/Maxwell.glb or update the path below.
+      // NOTE: if your folder name has spaces the browser will encode them as %20. You can rename the folder to avoid spaces.
+      const MODEL_PATH = "./3D_Models/"; // relative to this HTML file
+      const MODEL_FILE = "Maxwell.glb"; // change to your model filename
+      const result = await BABYLON.SceneLoader.ImportMeshAsync(null, MODEL_PATH, MODEL_FILE, scene);
+
+      // Optional: center and scale nicely
+      const root = new BABYLON.TransformNode("root", scene);
+      result.meshes.forEach(m => { if (m !== scene.getMeshByName("__root__")) m.setParent(root); });
+      root.position = BABYLON.Vector3.Zero();
+
+      // Fit to view
+      scene.createDefaultCameraOrLight(true, true, true);
+      scene.activeCamera = camera;
+      camera.setTarget(root.getBoundingInfo().boundingBox.centerWorld);
+      const size = root.getBoundingInfo().diagonalLength;
+      camera.radius = Math.max(2.5, size * 0.9);
+
+      // do not initialize WebXR here; it will be created outside so UI and feature detection can be handled uniformly
+      return { scene, root };
+    };
+
+    // Create the scene and wire up AR/VR controls after XR is available
+    (async () => {
+      // keep a top-level xr reference for UI handlers
+      let created = await createScene();
+      const scene = created.scene;
+
+      // createDefaultXRExperienceAsync will attach xr to scene; await and then access it
+      const xr = await scene.createDefaultXRExperienceAsync({
+        uiOptions: { sessionMode: "immersive-vr", referenceSpaceType: "local-floor" },
+        optionalFeatures: true
+      });
+
+
+      // save to window for debugging
+      window._xr = xr;
+
+      // enable hit-test and anchor features (AR only on capable devices) and create a reticle
+      const fm = xr.baseExperience.featuresManager;
+      let hitTest, anchors;
+      try {
+        hitTest = fm.enableFeature(BABYLON.WebXRHitTest.Name, "latest");
+        anchors = fm.enableFeature(BABYLON.WebXRAnchorSystem.Name, "latest");
+      } catch (e) {
+        console.warn('WebXR optional features not available:', e);
+      }
+
+      // Simple reticle for AR placement
+      const reticle = BABYLON.MeshBuilder.CreateTorus("reticle", {thickness:0.005, diameter:0.15}, scene);
+      reticle.rotation.x = Math.PI / 2;
+      reticle.isVisible = false;
+
+      if (hitTest) {
+        hitTest.onHitTestResultObservable.add(results => {
+          if (!xr.baseExperience.sessionManager.inXRSession || !results.length) {
+            reticle.isVisible = false;
+            return;
+          }
+          reticle.isVisible = true;
+          reticle.position.copyFrom(results[0].position);
+          reticle.rotationQuaternion = results[0].rotationQuaternion;
+        });
+      }
+
+      // Tap to move the model to the reticle in AR
+      scene.onPointerObservable.add((pointerInfo) => {
+        if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
+          if (xr && xr.baseExperience.state === BABYLON.WebXRState.IN_XR && reticle.isVisible) {
+            // `created` contains root
+            created.root.position.copyFrom(reticle.position);
+            if (reticle.rotationQuaternion) created.root.rotationQuaternion = reticle.rotationQuaternion.clone();
+          }
+        }
+      });
+
+      // expose enter/exit actions on the UI buttons
+      const enterAR = async () => {
+        try {
+          await xr.baseExperience.enterXRAsync('immersive-ar', 'local-floor');
+        } catch (err) {
+          alert('Failed to start AR session: ' + (err && err.message ? err.message : err));
+        }
+      };
+      const enterVR = async () => {
+        try {
+          await xr.baseExperience.enterXRAsync('immersive-vr', 'local-floor');
+        } catch (err) {
+          alert('Failed to start VR session: ' + (err && err.message ? err.message : err));
+        }
+      };
+
+      // Feature detection: use navigator.xr when available
+      if (navigator.xr && navigator.xr.isSessionSupported) {
+        try {
+          const arSupported = await navigator.xr.isSessionSupported('immersive-ar');
+          const vrSupported = await navigator.xr.isSessionSupported('immersive-vr');
+          if (arSupported) { btnAR.disabled = false; btnAR.addEventListener('click', enterAR); }
+          if (vrSupported) { btnVR.disabled = false; btnVR.addEventListener('click', enterVR); }
+        } catch (e) {
+          // fallback: enable VR by default if we have XR experience
+          btnVR.disabled = false; btnVR.addEventListener('click', enterVR);
+        }
+      } else {
+        // no navigator.xr available: still allow built-in UI to show
+        btnVR.disabled = false; btnVR.addEventListener('click', enterVR);
+      }
+
+      engine.runRenderLoop(() => scene.render());
+    })();
+
+    window.addEventListener("resize", () => engine.resize());
+  </script>
+</body>
+</html>
