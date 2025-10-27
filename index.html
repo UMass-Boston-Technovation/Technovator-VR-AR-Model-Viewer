@@ -128,19 +128,23 @@
 
         // Create one default experience (can start VR or AR sessions)
         xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
-          // If you add a ground mesh later, list it here to enable teleportation in VR
           floorMeshes: [],
+          uiOptions: {
+            sessionMode: "immersive-vr"
+          },
           optionalFeatures: [
-            "local-floor",      // nicer standing origin if supported
+            "local-floor",
             "bounded-floor",
             "hand-tracking",
-            "anchors",          // stick objects to real space in AR
-            "hit-test",         // AR surface placement
-            "plane-detection",  // AR planes
-            "dom-overlay"       // render DOM over AR if available
+            "anchors",
+            "hit-test",
+            "plane-detection",
+            "dom-overlay"
           ],
+          requiredFeatures: ["local-floor"], // needed for Quest VR
           domOverlay: { root: document.body }
         });
+
 
         // Enable optional AR helpers (will silently no-op if unsupported)
         const fm = xr.baseExperience.featuresManager;
@@ -174,11 +178,14 @@
         });
 
         btnAR.addEventListener("click", async () => {
-          if (btnAR.disabled) return;
-          await xr.baseExperience.enterXRAsync("immersive-ar", "local");
+        if (btnAR.disabled) return;
+        await xr.baseExperience.enterXRAsync("immersive-ar", "local", {
+          requiredFeatures: ["hit-test"],
+          optionalFeatures: ["dom-overlay", "plane-detection"],
+          domOverlay: { root: document.body }
         });
+      });
       }
-
       // If no WebXR, keep normal 3D view; buttons stay disabled as a hint
       return xr;
     }
