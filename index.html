@@ -113,82 +113,90 @@
       const btnVR = document.getElementById("enter-vr");
       const btnAR = document.getElementById("enter-ar");
 
-      // WebXR typically requires HTTPS or http://localhost. If unsupported, keep buttons disabled.
-      const xrAvailable = "xr" in navigator;
-      let xr = null;
+      // If no WebXR support, leave buttons disabled and return early
+      if (!("xr" in navigator)) {
+        console.warn("WebXR not supported in this browser — running in standard 3D mode.");
+        return null;
+      }
 
-      if (xrAvailable) {
-        // Probe support
+      let xr = null;
+      try {
+        // Probe support asynchronously
         const arSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-ar");
         const vrSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-vr");
 
-        // Enable buttons only when supported
         if (vrSupported) btnVR.disabled = false;
         if (arSupported) btnAR.disabled = false;
 
-        // Create one default experience (can start VR or AR sessions)
-        xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
-          floorMeshes: [],
-          uiOptions: {
-            sessionMode: "immersive-vr"
-          },
-          optionalFeatures: [
-            "local-floor",
-            "bounded-floor",
-            "hand-tracking",
-            "anchors",
-            "hit-test",
-            "plane-detection",
-            "dom-overlay"
-          ],
-          requiredFeatures: ["local-floor"], // needed for Quest VR
-          domOverlay: { root: document.body }
-        });
-
-
-        // Enable optional AR helpers (will silently no-op if unsupported)
-        const fm = xr.baseExperience.featuresManager;
-        fm.enableFeature(BABYLON.WebXRHitTest.Name, "latest", { transientHitTest: true });
-        fm.enableFeature(BABYLON.WebXRPlaneDetector.Name, "latest");
-        fm.enableFeature(BABYLON.WebXRAnchorSystem.Name, "latest");
-        fm.enableFeature(BABYLON.WebXRHandTracking.Name, "latest");
-
-        // Optional: simple AR reticle that appears when hit-test finds a surface
-        const reticle = BABYLON.MeshBuilder.CreateTorus("reticle", { thickness: 0.003, diameter: 0.08 }, scene);
-        reticle.isPickable = false; reticle.setEnabled(false);
-
-        const hitFeature = fm.getEnabledFeatures().find(f => f.name === BABYLON.WebXRHitTest.Name);
-        if (hitFeature) {
-          hitFeature.onHitTestResultObservable.add(results => {
-            const r = results && results[0];
-            if (r) {
-              reticle.setEnabled(true);
-              reticle.position.copyFrom(r.position);
-              if (r.rotationQuaternion) reticle.rotationQuaternion = r.rotationQuaternion.clone();
-            } else {
-              reticle.setEnabled(false);
-            }
+        // Only create experience if something is supported
+        if (vrSupported || arSupported) {
+          xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
+            floorMeshes: [],
+            optionalFeatures: [
+              "local-floor",
+              "bounded-floor",
+              "hand-tracking",
+              "anchors",
+              "hit-test",
+              "plane-detection",
+              "dom-overlay"
+            ],
+            domOverlay: { root: document.body }
           });
+
+          // Set up reticle for AR
+          const fm = xr.baseExperience.featuresManager;
+          fm.enableFeature(BABYLON.WebXRHitTest.Name, "latest", { transientHitTest: true });
+          fm.enableFeature(BABYLON.WebXRPlaneDetector.Name, "latest");
+          fm.enableFeature(BABYLON.WebXRAnchorSystem.Name, "latest");
+          fm.enableFeature(BABYLON.WebXRHandTracking.Name, "latest");
+
+          const reticle = BABYLON.MeshBuilder.CreateTorus("reticle", { thickness: 0.003, diameter: 0.08 }, scene);
+          reticle.isPickable = false;
+          reticle.setEnabled(false);
+          const mat = new BABYLON.StandardMaterial("reticleMat", scene);
+          mat.emissiveColor = new BABYLON.Color3(0, 1, 0);
+          reticle.material = mat;
+
+          const hitFeature = fm.getEnabledFeatures().find(f => f.name === BABYLON.WebXRHitTest.Name);
+          if (hitFeature) {
+            hitFeature.onHitTestResultObservable.add(results => {
+              const r = results && results[0];
+              if (r) {
+                reticle.setEnabled(true);
+                reticle.position.copyFrom(r.position);
+                if (r.rotationQuaternion) reticle.rotationQuaternion = r.rotationQuaternion.clone();
+              } else {
+                reticle.setEnabled(false);
+              }
+            });
+          }
+
+          // --- Button Handlers ---
+          btnVR.addEventListener("click", async () => {
+            if (btnVR.disabled) return;
+            await xr.baseExperience.enterXRAsync("immersive-vr", "local-floor");
+          });
+
+          btnAR.addEventListener("click", async () => {
+            if (btnAR.disabled) return;
+            await xr.baseExperience.enterXRAsync("immersive-ar", "local", {
+              requiredFeatures: ["hit-test"],
+              optionalFeatures: ["dom-overlay", "plane-detection"],
+              domOverlay: { root: document.body }
+            });
+          });
+        } else {
+          console.warn("Neither AR nor VR supported — running in standard 3D mode.");
         }
 
-        // Button handlers
-        btnVR.addEventListener("click", async () => {
-          if (btnVR.disabled) return;
-          await xr.baseExperience.enterXRAsync("immersive-vr", "local-floor");
-        });
-
-        btnAR.addEventListener("click", async () => {
-        if (btnAR.disabled) return;
-        await xr.baseExperience.enterXRAsync("immersive-ar", "local", {
-          requiredFeatures: ["hit-test"],
-          optionalFeatures: ["dom-overlay", "plane-detection"],
-          domOverlay: { root: document.body }
-        });
-      });
+      } catch (err) {
+        console.warn("WebXR initialization failed, continuing without XR:", err);
       }
-      // If no WebXR, keep normal 3D view; buttons stay disabled as a hint
+
       return xr;
     }
+
 
     // ---- Bootstrap engine/scene ----
     (async function main() {
