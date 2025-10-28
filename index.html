@@ -40,6 +40,11 @@
     <div class="row">
       <button id="enter-vr" class="btn" disabled>Enter VR</button>
       <button id="enter-ar" class="btn" disabled>Enter AR</button>
+      <select id="model-select" class="btn" onchange="loadNewModel(this.value)">
+        <option disabled selected value="">SELECT A MODEL</option>
+      <option value="maxwell3D.glb">Maxwell</option>
+      <option value="RangeRover.glb">Range Rover</option> <!-- Range Rover by IvOfficial [CC-BY] via Poly Pizza -->
+      </select>
     </div>
   </div>
 
@@ -49,37 +54,33 @@
   <script>
       // ---- Asset selection ----
     const MODEL_PATH = "./3D_Models/"; // e.g., "./3D_Models/"
-    const MODEL_FILE = "maxwell3D.glb";  // (case-sensitive on many hosts))
+    let engine = null;
+    let currentScene = null;
 
-    async function createScene(engine, canvas) {
+    // Create and configure a scene with the specified model
+    async function createScene(engine, canvas, modelFile = "maxwell3D.glb") {
       const scene = new BABYLON.Scene(engine);
       scene.createDefaultEnvironment({ createSkybox: false });
 
-      // Camera
+      // Camera setup
       const camera = new BABYLON.ArcRotateCamera("camera",
         Math.PI / 2, Math.PI / 3, 5,
         BABYLON.Vector3.Zero(), scene
       );
       camera.attachControl(canvas, true);
       camera.lowerRadiusLimit = 0.25;
-
-      // Light
       new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene);
 
-      // Optional test geometry (uncomment to sanity-check rendering)
-      // BABYLON.MeshBuilder.CreateBox("box", { size: 0.5 }, scene);
+      // Load model
+      const result = await BABYLON.SceneLoader.ImportMeshAsync("", MODEL_PATH, modelFile, scene);
 
-      // ---- Load model ----
-      const result = await BABYLON.SceneLoader.ImportMeshAsync("", MODEL_PATH, MODEL_FILE, scene);
-
-      // Optionally parent imported meshes under a TransformNode (not required)
+      // Parent meshes neatly
       const root = new BABYLON.TransformNode("root", scene);
       for (const m of result.meshes) {
-        // Keep the sceneLoader's "__root__" free; parent all other top-level meshes for organization
         if (m.name !== "__root__" && !m.parent) m.setParent(root);
       }
 
-      // ---- Safe framing: compute bounds from solid meshes ----
+      // Frame the camera to the model
       const solidMeshes = result.meshes.filter(m =>
         m instanceof BABYLON.Mesh && m.getTotalVertices && m.getTotalVertices() > 0
       );
@@ -92,28 +93,25 @@
         camera.setTarget(center);
         camera.radius = Math.max(2.5, extent * 0.9);
 
-        // Optional: gently lift the target if the model sits on Y=0
         if (center.y < 0.1 && minMax.max.y > 0.1) {
           camera.target = new BABYLON.Vector3(center.x, Math.min(0.5, minMax.max.y * 0.25), center.z);
         }
       } else {
-        // Fallback framing when nothing solid imported
         camera.setTarget(BABYLON.Vector3.Zero());
         camera.radius = 5;
       }
 
-      // Optional: enable built-in framing behavior too (nice for arc camera)
       camera.useFramingBehavior = true;
-
+      // Optionally configure the framing behavior mode:
+      // camera.framingBehavior.mode = BABYLON.FramingBehavior.FramingMode.FitFrustumSides;
       return scene;
     }
 
-    // ---- XR wiring (optional & graceful) ----
+    // XR setup (unchanged)
     async function setupXR(scene, engine) {
       const btnVR = document.getElementById("enter-vr");
       const btnAR = document.getElementById("enter-ar");
 
-      // If no WebXR support, leave buttons disabled and return early
       if (!("xr" in navigator)) {
         console.warn("WebXR not supported in this browser — running in standard 3D mode.");
         return null;
@@ -121,30 +119,22 @@
 
       let xr = null;
       try {
-        // Probe support asynchronously
         const arSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-ar");
         const vrSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-vr");
 
         if (vrSupported) btnVR.disabled = false;
         if (arSupported) btnAR.disabled = false;
 
-        // Only create experience if something is supported
         if (vrSupported || arSupported) {
           xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
             floorMeshes: [],
             optionalFeatures: [
-              "local-floor",
-              "bounded-floor",
-              "hand-tracking",
-              "anchors",
-              "hit-test",
-              "plane-detection",
-              "dom-overlay"
+              "local-floor", "bounded-floor", "hand-tracking",
+              "anchors", "hit-test", "plane-detection", "dom-overlay"
             ],
             domOverlay: { root: document.body }
           });
 
-          // Set up reticle for AR
           const fm = xr.baseExperience.featuresManager;
           fm.enableFeature(BABYLON.WebXRHitTest.Name, "latest", { transientHitTest: true });
           fm.enableFeature(BABYLON.WebXRPlaneDetector.Name, "latest");
@@ -172,7 +162,6 @@
             });
           }
 
-          // --- Button Handlers ---
           btnVR.addEventListener("click", async () => {
             if (btnVR.disabled) return;
             await xr.baseExperience.enterXRAsync("immersive-vr", "local-floor");
@@ -197,20 +186,27 @@
       return xr;
     }
 
+    // Handle model change from dropdown
+    async function loadNewModel(modelFile) {
+      if (!engine) return;
+      engine.stopRenderLoop();
+      if (currentScene) {
+        currentScene.dispose();
+      }
+      currentScene = await createScene(engine, document.getElementById("renderCanvas"), modelFile);
+      await setupXR(currentScene, engine);
+      engine.runRenderLoop(() => currentScene.render());
+    }
 
-    // ---- Bootstrap engine/scene ----
+    // Bootstrap the viewer
     (async function main() {
       const canvas = document.getElementById("renderCanvas");
-      const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
-
-      const scene = await createScene(engine, canvas);
-      await setupXR(scene, engine);
-
-      engine.runRenderLoop(() => scene.render());
+      engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+      currentScene = await createScene(engine, canvas);
+      await setupXR(currentScene, engine);
+      engine.runRenderLoop(() => currentScene.render());
       window.addEventListener("resize", () => engine.resize());
     })();
   </script>
-<!-- THIS SECTION CONTAINS THE ENGINE OF THE MODEL VIEWING CODE -->
-
 </body>
 </html>
