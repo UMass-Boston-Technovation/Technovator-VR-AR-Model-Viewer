@@ -126,7 +126,7 @@
 
         const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
           floorMeshes: [],
-          optionalFeatures: ["local-floor", "bounded-floor"]
+          optionalFeatures: ["local-floor", "bounded-floor", "hit-test", "anchors", "plane-detection", "hand-tracking"]
         });
 
         // Enter VR (safe)
