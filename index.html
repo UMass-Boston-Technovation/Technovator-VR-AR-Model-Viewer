@@ -13,6 +13,8 @@
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
 
+
+
   <style>
     html, body { height: 100%; margin: 0; overflow: hidden; background: #111; color: #eee; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
     #renderCanvas { width: 100%; height: 100%; touch-action: none; display: block; }
@@ -42,18 +44,18 @@
       <button id="enter-ar" class="btn" disabled>Enter AR</button>
       <select id="model-select" class="btn" onchange="loadNewModel(this.value)">
         <option disabled selected value="">SELECT A MODEL</option>
-      <option value="maxwell3D.glb">Maxwell</option>
-      <option value="RangeRover.glb">Range Rover</option> <!-- Range Rover by IvOfficial [CC-BY] via Poly Pizza -->
+        <option value="maxwell3D.glb">Maxwell</option>
+        <option value="RangeRover.glb">Range Rover</option> <!-- Range Rover by IvOfficial [CC-BY] via Poly Pizza -->
       </select>
+      <button id="upload-model" class="btn">+</button>
     </div>
   </div>
 
   <canvas id="renderCanvas"></canvas>
 
-  <!-- THIS SECTION CONTAINS THE ENGINE OF THE MODEL VIEWING CODE -->
   <script>
-      // ---- Asset selection ----
-    const MODEL_PATH = "./3D_Models/"; // e.g., "./3D_Models/"
+    // ---- Asset selection ----
+    const MODEL_PATH = "./3D_Models/";
     let engine = null;
     let currentScene = null;
 
@@ -102,8 +104,6 @@
       }
 
       camera.useFramingBehavior = true;
-      // Optionally configure the framing behavior mode:
-      // camera.framingBehavior.mode = BABYLON.FramingBehavior.FramingMode.FitFrustumSides;
       return scene;
     }
 
@@ -166,6 +166,80 @@
       await setupXR(currentScene, engine);
       engine.runRenderLoop(() => currentScene.render());
     }
+
+    // ===== HANDLE MODEL UPLOAD =====
+    const uploadBtn = document.getElementById("upload-model");
+
+    uploadBtn.addEventListener("click", async () => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".glb,.gltf,.obj,.fbx";
+
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const base64Data = reader.result.split(",")[1];
+          const filename = file.name;
+
+          const repoOwner = prompt("Enter GitHub username (repo owner):");
+          const repoName = prompt("Enter repository name:");
+          const token = prompt("Enter GitHub Personal Access Token (only needs 'repo:contents' scope):");
+
+          if (!repoOwner || !repoName || !token) {
+            alert("Upload cancelled: missing required information.");
+            return;
+          }
+
+          const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/3D_Models/${filename}`;
+
+          try {
+            const existingFile = await fetch(apiUrl, {
+              headers: { Authorization: `token ${token}` }
+            });
+            const exists = existingFile.status === 200;
+            let sha = null;
+            if (exists) {
+              const data = await existingFile.json();
+              sha = data.sha;
+              if (!confirm(`File ${filename} exists. Overwrite it?`)) return;
+            }
+
+            const response = await fetch(apiUrl, {
+              method: "PUT",
+              headers: {
+                "Authorization": `token ${token}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                message: `Upload ${filename} via AR/VR Model Viewer`,
+                content: base64Data,
+                sha: sha || undefined
+              })
+            });
+
+            if (response.ok) {
+              alert(`Uploaded ${filename} successfully!`);
+              const select = document.getElementById("model-select");
+              const option = document.createElement("option");
+              option.value = filename;
+              option.textContent = filename.replace(/\.[^/.]+$/, "");
+              select.appendChild(option);
+            } else {
+              const err = await response.json();
+              alert(`Upload failed: ${err.message}`);
+            }
+          } catch (error) {
+            console.error(error);
+            alert("Upload failed: " + error.message);
+          }
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    });
 
     // Bootstrap the viewer
     (async function main() {
