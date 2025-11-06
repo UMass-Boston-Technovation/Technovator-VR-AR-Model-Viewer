@@ -2,26 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>AR/VR Model Viewer</title>
+  <title>Technovator AR/VR Model Viewer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Silence favicon 404s -->
   <link rel="icon" href="data:," />
-
-  <!-- Babylon core + loaders + GUI (GUI optional) -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-
-
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
-    html, body { height: 100%; margin: 0; overflow: hidden; background: #111; color: #eee; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    #renderCanvas { width: 100%; height: 100%; touch-action: none; display: block; }
-
+    html, body {
+      height: 100%; margin: 0; overflow: hidden;
+      background: #111; color: #eee;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    #renderCanvas { width: 100%; height: 100%; display: block; }
     .note {
       position: absolute; left: 12px; top: 12px; z-index: 2;
-      background: rgba(0,0,0,0.55); padding: 10px 12px; border-radius: 8px; backdrop-filter: blur(6px);
+      background: rgba(0,0,0,0.55); padding: 10px 12px; border-radius: 8px;
       font-size: 14px; line-height: 1.35; max-width: min(420px, 85vw);
     }
     .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
@@ -30,223 +27,181 @@
       padding: 8px 12px; border-radius: 6px; cursor: pointer; font-weight: 600;
     }
     .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
-    .muted { opacity: 0.8; }
-    code { background: #222; padding: 1px 4px; border-radius: 4px; }
-    a { color: #9ad; }
+    input, select { border: 1px solid #333; background: #222; color: #eee; padding: 6px; border-radius: 4px; }
+    .auth-box {
+      position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.5);
+      padding: 10px; border-radius: 6px;
+    }
   </style>
 </head>
 <body>
   <div class="note">
-    <div><strong>UMB Technovator Model Viewer</strong></div>
-    <div class="muted">Note: Browser must support WebXR for AR/VR buttons to activate.</div>
+    <div><strong>Technovator AR/VR Model Viewer</strong></div>
+    <div class="muted">Login to upload and view your 3D models.</div>
     <div class="row">
       <button id="enter-vr" class="btn" disabled>Enter VR</button>
       <button id="enter-ar" class="btn" disabled>Enter AR</button>
-      <select id="model-select" class="btn" onchange="loadNewModel(this.value)">
+      <select id="model-select" class="btn">
         <option disabled selected value="">SELECT A MODEL</option>
-        <option value="maxwell3D.glb">Maxwell</option>
-        <option value="RangeRover.glb">Range Rover</option> <!-- Range Rover by IvOfficial [CC-BY] via Poly Pizza -->
       </select>
-      <button id="upload-model" class="btn">+</button>
+      <button id="upload-model" class="btn" disabled>+</button>
+      <button id="logout-btn" class="btn" style="display:none;">Logout</button>
     </div>
+  </div>
+
+  <div class="auth-box" id="auth-box">
+    <input type="email" id="email" placeholder="Email" />
+    <input type="password" id="password" placeholder="Password" />
+    <button id="login-btn" class="btn">Login / Sign Up</button>
   </div>
 
   <canvas id="renderCanvas"></canvas>
 
   <script>
-    // ---- Asset selection ----
-    const MODEL_PATH = "./3D_Models/";
-    let engine = null;
-    let currentScene = null;
+    // ==============================
+    //  SUPABASE CONFIGURATION
+    // ==============================
+    const SUPABASE_URL = "https://cdlnlhdeslmdzwbkskqc.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_i5h1CPV7RNrK13PSV9ADxw_wZtD1l8z";
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const BUCKET = "models";
 
-    // Create and configure a scene with the specified model
-    async function createScene(engine, canvas, modelFile = "maxwell3D.glb") {
+    // ==============================
+    //  BABYLON.JS SETUP
+    // ==============================
+    let engine, currentScene;
+    const canvas = document.getElementById("renderCanvas");
+
+    async function createScene(engine, canvas, modelUrl = null) {
       const scene = new BABYLON.Scene(engine);
       scene.createDefaultEnvironment({ createSkybox: false });
-
-      // Camera setup
       const camera = new BABYLON.ArcRotateCamera("camera",
-        Math.PI / 2, Math.PI / 3, 5,
-        BABYLON.Vector3.Zero(), scene
+        Math.PI / 2, Math.PI / 3, 5, BABYLON.Vector3.Zero(), scene
       );
       camera.attachControl(canvas, true);
-      camera.lowerRadiusLimit = 0.25;
       new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene);
 
-      // Load model
-      const result = await BABYLON.SceneLoader.ImportMeshAsync("", MODEL_PATH, modelFile, scene);
-
-      // Parent meshes neatly
-      const root = new BABYLON.TransformNode("root", scene);
-      for (const m of result.meshes) {
-        if (m.name !== "__root__" && !m.parent) m.setParent(root);
+      if (modelUrl) {
+        await BABYLON.SceneLoader.ImportMeshAsync("", modelUrl, "", scene);
       }
-
-      // Frame the camera to the model
-      const solidMeshes = result.meshes.filter(m =>
-        m instanceof BABYLON.Mesh && m.getTotalVertices && m.getTotalVertices() > 0
-      );
-
-      if (solidMeshes.length) {
-        const minMax = BABYLON.Mesh.MinMax(solidMeshes);
-        const center = minMax.min.add(minMax.max).scale(0.5);
-        const extent = minMax.max.subtract(minMax.min).length();
-
-        camera.setTarget(center);
-        camera.radius = Math.max(2.5, extent * 0.9);
-
-        if (center.y < 0.1 && minMax.max.y > 0.1) {
-          camera.target = new BABYLON.Vector3(center.x, Math.min(0.5, minMax.max.y * 0.25), center.z);
-        }
-      } else {
-        camera.setTarget(BABYLON.Vector3.Zero());
-        camera.radius = 5;
-      }
-
-      camera.useFramingBehavior = true;
       return scene;
     }
 
-    // XR setup
-    async function setupXR(scene, engine) {
+    async function setupXR(scene) {
       const btnVR = document.getElementById("enter-vr");
       const btnAR = document.getElementById("enter-ar");
+      if (!("xr" in navigator)) return;
 
-      if (!("xr" in navigator)) {
-        console.warn("WebXR not supported in this browser — running in standard 3D mode.");
-        return null;
-      }
+      const arSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-ar");
+      const vrSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-vr");
+      if (vrSupported) btnVR.disabled = false;
+      if (arSupported) btnAR.disabled = false;
 
-      try {
-        const arSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-ar");
-        const vrSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-vr");
+      const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
+        optionalFeatures: ["local-floor", "bounded-floor"]
+      });
+      btnVR.onclick = async () => xr.baseExperience.enterXRAsync("immersive-vr", "local-floor");
+      btnAR.onclick = async () => xr.baseExperience.enterXRAsync("immersive-ar", "local");
+    }
 
-        if (vrSupported) btnVR.disabled = false;
-        if (arSupported) btnAR.disabled = false;
+    // ==============================
+    //  SUPABASE AUTH + STORAGE
+    // ==============================
 
-        const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
-          floorMeshes: [],
-          optionalFeatures: ["local-floor", "bounded-floor", "hit-test", "anchors", "plane-detection", "hand-tracking"]
-        });
-
-        // Enter VR (safe)
-        btnVR.addEventListener("click", async () => {
-          if (btnVR.disabled) return;
-          await xr.baseExperience.enterXRAsync("immersive-vr", "local-floor");
-        });
-
-        // Enter AR (with AR-only features)
-        btnAR.addEventListener("click", async () => {
-          if (btnAR.disabled) return;
-          const arExperience = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
-            optionalFeatures: ["hit-test", "plane-detection"],
-            domOverlay: { root: document.body }
-          });
-          await arExperience.baseExperience.enterXRAsync("immersive-ar", "local", {
-            requiredFeatures: ["hit-test"],
-            optionalFeatures: ["dom-overlay", "plane-detection"]
-          });
-        });
-
-        return xr;
-      } catch (err) {
-        console.warn("WebXR initialization failed:", err);
-        return null;
+    async function checkUser() {
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      if (user) {
+        document.getElementById("auth-box").style.display = "none";
+        document.getElementById("upload-model").disabled = false;
+        document.getElementById("logout-btn").style.display = "inline-block";
+        await loadModelList(user);
+      } else {
+        document.getElementById("auth-box").style.display = "block";
+        document.getElementById("upload-model").disabled = true;
+        document.getElementById("logout-btn").style.display = "none";
       }
     }
 
-    // Handle model change from dropdown
-    async function loadNewModel(modelFile) {
-      if (!engine) return;
-      engine.stopRenderLoop();
-      if (currentScene) {
-        currentScene.dispose();
+    // LOGIN or SIGNUP
+    document.getElementById("login-btn").onclick = async () => {
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      if (!email || !password) return alert("Enter email and password");
+
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error && error.message.includes("Invalid login")) {
+        await supabaseClient.auth.signUp({ email, password });
+        alert("Account created. Check your email for confirmation.");
+      } else if (data.user) {
+        alert("Logged in successfully.");
       }
-      currentScene = await createScene(engine, document.getElementById("renderCanvas"), modelFile);
-      await setupXR(currentScene, engine);
-      engine.runRenderLoop(() => currentScene.render());
+      await checkUser();
+    };
+
+    // LOGOUT
+    document.getElementById("logout-btn").onclick = async () => {
+      await supabaseClient.auth.signOut();
+      await checkUser();
+    };
+
+    // LOAD USER'S MODELS
+    async function loadModelList(user) {
+      const path = `${user.id}`;
+      const { data, error } = await supabaseClient.storage.from(BUCKET).list(path, { limit: 100 });
+      const select = document.getElementById("model-select");
+      select.innerHTML = '<option disabled selected value="">SELECT A MODEL</option>';
+      if (error) return console.error(error);
+
+      data.forEach(item => {
+        if (!item.name.match(/\.(glb|gltf|obj|fbx)$/i)) return;
+        const opt = document.createElement("option");
+        opt.value = item.name;
+        opt.textContent = item.name.replace(/\.[^/.]+$/, "");
+        select.appendChild(opt);
+      });
     }
 
-    // ===== HANDLE MODEL UPLOAD =====
-    const uploadBtn = document.getElementById("upload-model");
+    // UPLOAD MODEL
+    document.getElementById("upload-model").onclick = async () => {
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      if (!user) return alert("Please login first.");
 
-    uploadBtn.addEventListener("click", async () => {
       const input = document.createElement("input");
       input.type = "file";
       input.accept = ".glb,.gltf,.obj,.fbx";
-
       input.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = async () => {
-          const base64Data = reader.result.split(",")[1];
-          const filename = file.name;
-
-          const repoOwner = prompt("Enter GitHub username (repo owner):");
-          const repoName = prompt("Enter repository name:");
-          const token = prompt("Enter GitHub Personal Access Token (only needs 'repo:contents' scope):");
-
-          if (!repoOwner || !repoName || !token) {
-            alert("Upload cancelled: missing required information.");
-            return;
-          }
-
-          const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/3D_Models/${filename}`;
-
-          try {
-            const existingFile = await fetch(apiUrl, {
-              headers: { Authorization: `token ${token}` }
-            });
-            const exists = existingFile.status === 200;
-            let sha = null;
-            if (exists) {
-              const data = await existingFile.json();
-              sha = data.sha;
-              if (!confirm(`File ${filename} exists. Overwrite it?`)) return;
-            }
-
-            const response = await fetch(apiUrl, {
-              method: "PUT",
-              headers: {
-                "Authorization": `token ${token}`,
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                message: `Upload ${filename} via AR/VR Model Viewer`,
-                content: base64Data,
-                sha: sha || undefined
-              })
-            });
-
-            if (response.ok) {
-              alert(`Uploaded ${filename} successfully!`);
-              const select = document.getElementById("model-select");
-              const option = document.createElement("option");
-              option.value = filename;
-              option.textContent = filename.replace(/\.[^/.]+$/, "");
-              select.appendChild(option);
-            } else {
-              const err = await response.json();
-              alert(`Upload failed: ${err.message}`);
-            }
-          } catch (error) {
-            console.error(error);
-            alert("Upload failed: " + error.message);
-          }
-        };
-        reader.readAsDataURL(file);
+        const path = `${user.id}/${file.name}`;
+        const { error } = await supabaseClient.storage.from(BUCKET).upload(path, file, { upsert: true });
+        if (error) return alert("Upload failed: " + error.message);
+        alert(`✅ Uploaded ${file.name}`);
+        await loadModelList(user);
       };
       input.click();
-    });
+    };
 
-    // Bootstrap the viewer
+    // SELECT MODEL TO LOAD
+    document.getElementById("model-select").onchange = async (e) => {
+      const filename = e.target.value;
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      const modelUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${user.id}/${filename}`;
+      console.log("Loading model from:", modelUrl); // optional debug line
+      if (currentScene) currentScene.dispose();
+      currentScene = await createScene(engine, canvas, modelUrl);
+      await setupXR(currentScene);
+      engine.runRenderLoop(() => currentScene.render());
+    };
+
+    // ==============================
+    //  MAIN INITIALIZATION
+    // ==============================
     (async function main() {
-      const canvas = document.getElementById("renderCanvas");
-      engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+      engine = new BABYLON.Engine(canvas, true);
       currentScene = await createScene(engine, canvas);
-      await setupXR(currentScene, engine);
+      await setupXR(currentScene);
+      await checkUser();
       engine.runRenderLoop(() => currentScene.render());
       window.addEventListener("resize", () => engine.resize());
     })();
