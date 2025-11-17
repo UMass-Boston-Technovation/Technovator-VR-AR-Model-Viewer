@@ -100,47 +100,6 @@
       const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
         optionalFeatures: ["local-floor", "bounded-floor"]
       });
-        const fm = xr.baseExperience.featuresManager;
-
-      const interaction = fm.enableFeature(
-        BABYLON.WebXRFeatureName.POINTER_SELECTION,
-        "latest",
-        {
-          xrInput: xr.input,
-          enablePointerSelectionOnAllControllers: true
-        }
-      );
-      
-      const interactionMode = fm.enableFeature(
-      BABYLON.WebXRFeatureName.HAND_TRACKING,
-      "latest",
-    {
-      xrInput: xr.input,
-      jointMeshes: {
-        enabled: true
-      }
-    }
-  );
-  //grab/drag/rotate/scale behavior
-        const movement = fm.enableFeature(
-          BABYLON.WebXRFeatureName.MOVEMENT,
-          "latest",
-          {
-            movementEnabled: true,
-            rotationEnabled: true,
-            snapToMove: false,
-            snapToRotate: false
-          }
-        );
-        scene.onPointerObservable.add((pointerInfo) => {
-    if(pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
-      const pick = scene.pick(scene.pointerX, scene.pointerY);
-      if (pick.hit && pick.pickedMesh) {
-        pick.pickedMesh.addBehavior(new BABYLON.ScalarBehavior());
-        pick.pickedMesh.addBehavior(new BABYLON.RotateMeshesBehavior());
-      }
-    }
-  });
       btnVR.onclick = async () => xr.baseExperience.enterXRAsync("immersive-vr", "local-floor");
       btnAR.onclick = async () => xr.baseExperience.enterXRAsync("immersive-ar", "local");
     }
