@@ -122,7 +122,7 @@
       }
     }
 
-    // LOGIN or SIGNUP
+    // LOGIN or SIGNUP (WORKS)
     document.getElementById("login-btn").onclick = async () => {
       const email = document.getElementById("email").value;
       const password = document.getElementById("password").value;
@@ -138,13 +138,19 @@
       await checkUser();
     };
 
-    // LOGOUT
+    // LOGOUT (WORKS)
     document.getElementById("logout-btn").onclick = async () => {
       await supabaseClient.auth.signOut();
+      document.getElementById("model-select").innerHTML = '<option disabled selected value="">SELECT A MODEL</option>';
+      // Clear the current model from the viewer
+      if (currentScene) currentScene.dispose();
+      currentScene = await createScene(engine, canvas);
+      await setupXR(currentScene);
+      engine.runRenderLoop(() => currentScene.render());
       await checkUser();
     };
 
-    // LOAD USER'S MODELS
+    // LOAD USER'S MODELS (WORKS)
     async function loadModelList(user) {
       const path = `${user.id}`;
       const { data, error } = await supabaseClient.storage.from(BUCKET).list(path, { limit: 100 });
@@ -161,7 +167,7 @@
       });
     }
 
-    // UPLOAD MODEL
+    // UPLOAD MODEL (WORKS)
     document.getElementById("upload-model").onclick = async () => {
       const { data: { user } } = await supabaseClient.auth.getUser();
       if (!user) return alert("Please login first.");
@@ -182,7 +188,7 @@
       input.click();
     };
 
-    // SELECT MODEL TO LOAD
+    // SELECT MODEL TO LOAD (WORKS)
     document.getElementById("model-select").onchange = async (e) => {
       const filename = e.target.value;
       const { data: { user } } = await supabaseClient.auth.getUser();
