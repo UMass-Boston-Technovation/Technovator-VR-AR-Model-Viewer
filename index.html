@@ -100,6 +100,80 @@
       const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
         optionalFeatures: ["local-floor", "bounded-floor"]
       });
+      // Enable pointer selection and near interaction features
+      try {
+        const fm = xr.baseExperience.featuresManager;
+        fm.enableFeature(BABYLON.WebXRFeatureName.POINTER_SELECTION, "latest");
+        fm.enableFeature(BABYLON.WebXRFeatureName.NEAR_INTERACTION, "latest");
+
+        // Controller state for grab/scale
+        const controllers = {};
+
+        xr.input.onControllerAddedObservable.add((xrController) => {
+          const id = xrController.uniqueId || String(Date.now());
+          controllers[id] = { xrController, grabbedMesh: null, origParent: null, origScaling: null };
+
+          xrController.onMotionControllerInitObservable && xrController.onMotionControllerInitObservable.add((motionController) => {
+            let trigger = motionController.getComponent && motionController.getComponent("trigger");
+            if (!trigger && motionController.getComponent) {
+              trigger = motionController.getComponent("xr-standard-trigger") || trigger;
+            }
+            if (!trigger) return;
+
+            trigger.onButtonStateChangedObservable.add(() => {
+              const state = trigger.pressed;
+              const s = controllers[id];
+              if (state) {
+                // try pick with forward ray
+                const forwardRay = (xrController.pointer && xrController.pointer.getForwardRay && xrController.pointer.getForwardRay()) || (xrController.getForwardRay && xrController.getForwardRay());
+                if (!forwardRay) return;
+                const pick = scene.pickWithRay(forwardRay);
+                if (pick && pick.hit && pick.pickedMesh) {
+                  const mesh = pick.pickedMesh;
+                  s.grabbedMesh = mesh;
+                  s.origParent = mesh.parent;
+                  s.origScaling = mesh.scaling && mesh.scaling.clone ? mesh.scaling.clone() : new BABYLON.Vector3(1,1,1);
+                  // Attach mesh to controller grip (or pointer) so it follows rotation/position
+                  try { mesh.setParent(xrController.grip || xrController.pointer || xrController); } catch(e) { mesh.parent = xrController.grip || xrController.pointer || null; }
+                }
+              } else {
+                // release
+                if (s && s.grabbedMesh) {
+                  try { s.grabbedMesh.setParent(s.origParent || null); } catch(e) { s.grabbedMesh.parent = s.origParent || null; }
+                  s.grabbedMesh = null;
+                  s.origParent = null;
+                }
+              }
+            });
+          });
+        });
+
+        // Two-hand scaling helper
+        function updateTwoHandScaling() {
+          const held = Object.values(controllers).filter(c => c.grabbedMesh);
+          if (held.length === 2 && held[0].grabbedMesh === held[1].grabbedMesh) {
+            const mc = held[0].grabbedMesh;
+            const g0 = held[0].xrController.grip || held[0].xrController.pointer;
+            const g1 = held[1].xrController.grip || held[1].xrController.pointer;
+            if (!g0 || !g1) return;
+            const p0 = g0.position || BABYLON.Vector3.Zero();
+            const p1 = g1.position || BABYLON.Vector3.Zero();
+            const curDist = BABYLON.Vector3.Distance(p0, p1);
+            if (!mc._twoHand) {
+              mc._twoHand = { initialDistance: curDist || 1, initialScale: mc.scaling && mc.scaling.clone ? mc.scaling.clone() : new BABYLON.Vector3(1,1,1) };
+            }
+            const scaleFactor = (mc._twoHand.initialDistance > 0) ? (curDist / mc._twoHand.initialDistance) : 1;
+            mc.scaling = mc._twoHand.initialScale.scale(scaleFactor);
+          } else {
+            // clear two-hand state when not holding with two controllers
+            Object.values(controllers).forEach(c => { if (c.grabbedMesh && c.grabbedMesh._twoHand) c.grabbedMesh._twoHand = null; });
+          }
+        }
+
+        scene.onBeforeRenderObservable.add(() => updateTwoHandScaling());
+      } catch (e) {
+        console.warn('XR interaction features not available:', e);
+      }
       btnVR.onclick = async () => xr.baseExperience.enterXRAsync("immersive-vr", "local-floor");
       btnAR.onclick = async () => xr.baseExperience.enterXRAsync("immersive-ar", "local");
     }
