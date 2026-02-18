@@ -49,126 +49,73 @@ async function setupXR(scene) {
 
   let arSession = null;
   let modelMesh = null;
-  let modelScale = 1;
-  let modelRotation = 0;
 
-  // ===== GESTURE TRACKING =====
-  let touchStartDistance = 0;
-  let touchStartScale = 1;
-  let lastTouchX = 0;
-  let lastTouchY = 0;
+  // ===== AR BEHAVIORS =====
+  const pointerDragBehavior = new BABYLON.PointerDragBehavior({ dragPlaneNormal: new BABYLON.Vector3(0, 1, 0) });
+  pointerDragBehavior.useObjectOrientationForDragging = false;
 
-  function getTouchDistance(touches) {
-    if (touches.length < 2) return 0;
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
+  const scaleBehavior = new BABYLON.MultiPointerScaleBehavior();
 
-  // ===== AR GESTURE LISTENERS =====
-  canvas.addEventListener("touchstart", (e) => {
-    if (!arSession) return;
-    if (e.touches.length === 2) {
-      touchStartDistance = getTouchDistance(e.touches);
-      touchStartScale = modelScale;
-      e.preventDefault();
-    } else if (e.touches.length === 1) {
-      lastTouchX = e.touches[0].clientX;
-      lastTouchY = e.touches[0].clientY;
-    }
-  }, false);
-
-  canvas.addEventListener("touchmove", (e) => {
-    if (!arSession || !modelMesh) return;
-
-    if (e.touches.length === 2) {
-      // Two-finger pinch to scale
-      const distance = getTouchDistance(e.touches);
-      const scaleRatio = distance / touchStartDistance;
-      modelScale = touchStartScale * scaleRatio;
-      modelScale = Math.max(0.1, Math.min(5, modelScale));
-      modelMesh.scaling = new BABYLON.Vector3(modelScale, modelScale, modelScale);
-      e.preventDefault();
-    } else if (e.touches.length === 1) {
-      // Single finger drag to rotate
-      const deltaX = e.touches[0].clientX - lastTouchX;
-      modelRotation = deltaX * 0.01;
-      if (modelMesh) {
-        modelMesh.rotation.y = modelRotation;
-      }
-      lastTouchX = e.touches[0].clientX;
-      lastTouchY = e.touches[0].clientY;
-    }
-  }, false);
-
-  // ===== AR PLACEMENT WITH HIT TEST =====
+  // ===== AR PLACEMENT (screen / scene pick fallback) =====
   canvas.addEventListener("click", async (e) => {
-    if (!arSession || !xr.baseExperience) return;
+    if (!arSession || !xr || !xr.baseExperience) return;
+
+    // Only place if a model exists and it's not already placed (parent === null)
+    if (!modelMesh || modelMesh.parent !== null) return;
 
     try {
-      const hitTestFeature = xr.baseExperience.features.getFeatureManager()
-        .enableFeature(BABYLON.WebXRFeatureName.HIT_TEST, "latest");
-
-      const ray = scene.createPickingRay(
-        scene.pointerX,
-        scene.pointerY,
-        BABYLON.Matrix.Identity(),
-        scene.activeCamera
-      );
-
-      const hit = scene.pickWithRay(ray, (mesh) => mesh !== modelMesh);
-      
-      if (modelMesh && modelMesh.parent === null) {
-        // Model not placed yet
-        if (hit && hit.hit) {
-          modelMesh.position = hit.hit.getAbsolute(BABYLON.Space.WORLD);
-          placementGuide.classList.remove("active");
-          arInfo.querySelector("#ar-info-text").textContent = "Model placed! Use gestures to adjust.";
-        }
-      }
-    } catch (err) {
-      console.log("Hit test not available, using screen center placement", err);
-      if (modelMesh && modelMesh.parent === null) {
-        modelMesh.position = new BABYLON.Vector3(0, -0.5, -1.5);
+      // Try a normal scene pick at the pointer to get a world point on any hittable mesh
+      const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh !== modelMesh);
+      if (pick && pick.hit && pick.pickedPoint) {
+        modelMesh.position.copyFrom(pick.pickedPoint);
         placementGuide.classList.remove("active");
-        arInfo.querySelector("#ar-info-text").textContent = "Model placed!";
+        arInfo.querySelector("#ar-info-text").textContent = "Model placed! Use gestures to adjust.";
+        return;
       }
+
+      // If pick failed, as a fallback place the model in front of the camera at a reasonable distance
+      const forward = scene.activeCamera.getForwardRay().direction;
+      const camPos = scene.activeCamera.position;
+      const fallbackPos = camPos.add(forward.scale(1.5));
+      modelMesh.position = fallbackPos;
+      placementGuide.classList.remove("active");
+      arInfo.querySelector("#ar-info-text").textContent = "Model placed!";
+    } catch (err) {
+      console.warn("AR placement failed, using fallback position:", err);
+      modelMesh.position = new BABYLON.Vector3(0, -0.5, -1.5);
+      placementGuide.classList.remove("active");
+      arInfo.querySelector("#ar-info-text").textContent = "Model placed!";
     }
   });
 
   // ===== AR CONTROLS =====
   document.getElementById("ar-scale-up").onclick = () => {
     if (modelMesh) {
-      modelScale = Math.min(5, modelScale + 0.2);
-      modelMesh.scaling = new BABYLON.Vector3(modelScale, modelScale, modelScale);
+      modelMesh.scaling.addInPlace(new BABYLON.Vector3(0.2, 0.2, 0.2));
     }
   };
 
   document.getElementById("ar-scale-down").onclick = () => {
     if (modelMesh) {
-      modelScale = Math.max(0.1, modelScale - 0.2);
-      modelMesh.scaling = new BABYLON.Vector3(modelScale, modelScale, modelScale);
+      modelMesh.scaling.subtractInPlace(new BABYLON.Vector3(0.2, 0.2, 0.2));
+      if (modelMesh.scaling.x < 0.1) modelMesh.scaling = new BABYLON.Vector3(0.1, 0.1, 0.1);
     }
   };
 
   document.getElementById("ar-rotate-left").onclick = () => {
     if (modelMesh) {
-      modelRotation -= 0.3;
-      modelMesh.rotation.y = modelRotation;
+      modelMesh.rotation.y -= 0.3;
     }
   };
 
   document.getElementById("ar-rotate-right").onclick = () => {
     if (modelMesh) {
-      modelRotation = 0.3;
-      modelMesh.rotation.y = modelRotation;
+      modelMesh.rotation.y += 0.3;
     }
   };
 
   document.getElementById("ar-reset").onclick = () => {
     if (modelMesh) {
-      modelScale = 1;
-      modelRotation = 0;
       modelMesh.scaling = new BABYLON.Vector3(1, 1, 1);
       modelMesh.rotation.y = 0;
       modelMesh.position = new BABYLON.Vector3(0, 0, 0);
@@ -201,6 +148,10 @@ async function setupXR(scene) {
     if (arSession && !modelMesh && scene.meshes.length > 1) {
       // Auto-detect loaded model
       modelMesh = scene.meshes.find(m => m !== scene.getMeshByName("default") && m.name !== "");
+      if (modelMesh) {
+        modelMesh.addBehavior(pointerDragBehavior);
+        modelMesh.addBehavior(scaleBehavior);
+      }
     }
   });
 
