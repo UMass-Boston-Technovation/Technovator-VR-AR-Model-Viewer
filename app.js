@@ -190,7 +190,9 @@ document.getElementById("login-btn").onclick = async () => {
   if (!email || !password) return alert("Enter email and password");
 
   const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-  if (error && error.message.includes("Invalid login")) {
+  if (error && error.message.includes("Invalid login credentials")) {
+    alert("Unsuccessful login: Invalid password.");
+  } else if (error) {
     await supabaseClient.auth.signUp({ email, password });
     alert("Account created. Check your email for confirmation.");
   } else if (data.user) {
