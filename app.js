@@ -47,6 +47,14 @@ async function setupXR(scene) {
     domOverlay: { root: document.body }
   });
 
+  // Verify WebXRControllerPointerSelection is enabled (it is by default)
+  // This enables controller/touch interaction with meshes (required for behaviors)
+  if (xr.pointerSelection) {
+    // Optional: Configure for AR (hide laser/ring if preferred)
+    xr.pointerSelection.displayLaserPointer = false;
+    xr.pointerSelection.displaySelectionMesh = false;
+  }
+
   let arSession = null;
   let modelMesh = null;
 
@@ -147,7 +155,9 @@ async function setupXR(scene) {
   scene.onBeforeCameraRenderObservable.add(() => {
     if (arSession && !modelMesh && scene.meshes.length > 1) {
       // Auto-detect loaded model
-      modelMesh = scene.meshes.find(m => m !== scene.getMeshByName("default") && m.name !== "");
+      modelMesh = scene.meshes.find(m => m.name === "__root__") || 
+                  scene.meshes.find(m => m !== scene.getMeshByName("default") && m.name !== "" && m.parent === null);
+      
       if (modelMesh) {
         modelMesh.addBehavior(pointerDragBehavior);
         modelMesh.addBehavior(scaleBehavior);
