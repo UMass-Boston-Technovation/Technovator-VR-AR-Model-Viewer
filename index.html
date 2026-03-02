@@ -16,12 +16,17 @@
     <div><strong>Technovator AR/VR Model Viewer</strong></div>
     <div class="muted">Login to upload and view your 3D models.</div>
     <div class="row">
-      <button id="enter-vr" class="btn" disabled>Enter VR</button>
-      <button id="enter-ar" class="btn" disabled>Enter AR</button>
+      <div id="vr-wrapper" style="display:inline-block" title="Feature only available on VR devices">
+        <button id="enter-vr" class="btn" disabled style="pointer-events:none">Enter VR</button>
+      </div>
+      <div id="ar-wrapper" style="display:inline-block" title="Feature only available on mobile AR devices">
+        <button id="enter-ar" class="btn" disabled style="pointer-events:none">Enter AR</button>
+      </div>
       <select id="model-select" class="btn">
         <option disabled selected value="">SELECT A MODEL</option>
       </select>
       <button id="upload-model" class="btn" disabled>+</button>
+      <button id="settings-btn" class="btn" disabled><img src="assets/settingsicon.png" alt="Settings" /></button>
       <button id="logout-btn" class="btn" style="display:none;">Logout</button>
     </div>
   </div>
@@ -29,7 +34,9 @@
   <div class="auth-box" id="auth-box">
     <input type="email" id="email" placeholder="Email" />
     <input type="password" id="password" placeholder="Password" />
-    <button id="login-btn" class="btn">Login / Sign Up</button>
+    <button id="login-btn" class="btn">Login</button>
+    <button class="btn" onclick="window.location.href='register.html'">Register</button>
+    <button id="forgot-password-btn" class="btn" style="background: transparent; border: none; font-size: 12px; text-decoration: underline; margin-top: 5px; width: 100%;">Forgot Password?</button>
   </div>
 
   <div class="ar-controls" id="ar-controls">

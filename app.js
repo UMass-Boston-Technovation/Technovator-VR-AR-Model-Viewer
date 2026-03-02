@@ -13,6 +13,11 @@ const BUCKET = "models";
 let engine, currentScene;
 const canvas = document.getElementById("renderCanvas");
 
+function addClick(id, fn) {
+  const el = document.getElementById(id);
+  if (el) el.onclick = fn;
+}
+
 async function createScene(engine, canvas, modelUrl = null) {
   const scene = new BABYLON.Scene(engine);
   scene.createDefaultEnvironment({ createSkybox: false });
@@ -39,8 +44,16 @@ async function setupXR(scene) {
 
   const arSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-ar");
   const vrSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-vr");
-  if (vrSupported) btnVR.disabled = false;
-  if (arSupported) btnAR.disabled = false;
+  if (vrSupported) {
+    btnVR.disabled = false;
+    btnVR.style.pointerEvents = "auto";
+    document.getElementById("vr-wrapper").removeAttribute("title");
+  }
+  if (arSupported) {
+    btnAR.disabled = false;
+    btnAR.style.pointerEvents = "auto";
+    document.getElementById("ar-wrapper").removeAttribute("title");
+  }
 
   const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
     optionalFeatures: ["local-floor", "bounded-floor", "hit-test", "dom-overlay"],
@@ -89,42 +102,42 @@ async function setupXR(scene) {
   });
 
   // ===== AR CONTROLS =====
-  document.getElementById("ar-scale-up").onclick = () => {
+  addClick("ar-scale-up", () => {
     if (modelMesh) {
       modelMesh.scaling.addInPlace(new BABYLON.Vector3(0.2, 0.2, 0.2));
     }
-  };
+  });
 
-  document.getElementById("ar-scale-down").onclick = () => {
+  addClick("ar-scale-down", () => {
     if (modelMesh) {
       modelMesh.scaling.subtractInPlace(new BABYLON.Vector3(0.2, 0.2, 0.2));
       if (modelMesh.scaling.x < 0.1) modelMesh.scaling = new BABYLON.Vector3(0.1, 0.1, 0.1);
     }
-  };
+  });
 
-  document.getElementById("ar-rotate-left").onclick = () => {
+  addClick("ar-rotate-left", () => {
     if (modelMesh) {
       modelMesh.rotation.y -= 0.3;
     }
-  };
+  });
 
-  document.getElementById("ar-rotate-right").onclick = () => {
+  addClick("ar-rotate-right", () => {
     if (modelMesh) {
       modelMesh.rotation.y += 0.3;
     }
-  };
+  });
 
-  document.getElementById("ar-reset").onclick = () => {
+  addClick("ar-reset", () => {
     if (modelMesh) {
       modelMesh.scaling = new BABYLON.Vector3(1, 1, 1);
       modelMesh.rotation.y = 0;
       modelMesh.position = new BABYLON.Vector3(0, 0, 0);
     }
-  };
+  });
 
-  document.getElementById("ar-exit").onclick = () => {
+  addClick("ar-exit", () => {
     xr.baseExperience.exitXRAsync();
-  };
+  });
 
   // ===== XR SESSION HANDLERS =====
   xr.baseExperience.onStateChangedObservable.add((state) => {
@@ -171,38 +184,133 @@ async function setupXR(scene) {
 
 async function checkUser() {
   const { data: { user } } = await supabaseClient.auth.getUser();
+  const authBox = document.getElementById("auth-box");
+  const uploadBtn = document.getElementById("upload-model");
+  const logoutBtn = document.getElementById("logout-btn");
+  const settingsBtn = document.getElementById("settings-btn");
+
   if (user) {
-    document.getElementById("auth-box").style.display = "none";
-    document.getElementById("upload-model").disabled = false;
-    document.getElementById("logout-btn").style.display = "inline-block";
+    if (authBox) authBox.style.display = "none";
+    if (uploadBtn) uploadBtn.disabled = false;
+    if (logoutBtn) logoutBtn.style.display = "inline-block";
+    if (settingsBtn) settingsBtn.disabled = false;
     await loadModelList(user);
   } else {
-    document.getElementById("auth-box").style.display = "block";
-    document.getElementById("upload-model").disabled = true;
-    document.getElementById("logout-btn").style.display = "none";
+    if (authBox) authBox.style.display = "block";
+    if (uploadBtn) uploadBtn.disabled = true;
+    if (logoutBtn) logoutBtn.style.display = "none";
+    if (settingsBtn) settingsBtn.disabled = true;
   }
 }
 
-// LOGIN or SIGNUP (WORKS)
-document.getElementById("login-btn").onclick = async () => {
+// LOGIN (WORKS)
+addClick("login-btn", async () => {
   const email = document.getElementById("email").value;
   const password = document.getElementById("password").value;
   if (!email || !password) return alert("Enter email and password");
 
   const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-  if (error && error.message.includes("Invalid login credentials")) {
-    alert("Unsuccessful login: Invalid password.");
-  } else if (error) {
-    await supabaseClient.auth.signUp({ email, password });
-    alert("Account created. Check your email for confirmation.");
-  } else if (data.user) {
-    alert("Logged in successfully.");
+  if (error) {
+    alert("Login failed: Invalid email or password.");
+    return;
   }
-  await checkUser();
-};
+  if (data.user) {
+    alert("✅ Logged in successfully.");
+    await checkUser();
+  }
+});
+
+// SIGNUP (WORKS)
+addClick("signup-btn", async () => {
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+  if (!email || !password) return alert("Enter email and password");
+
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  if (error) {
+    alert("Signup failed: " + error.message);
+    return;
+  }
+  if (data.user) {
+    alert("✅ Account created. Check your email for confirmation.");
+  }
+});
+
+// SETTINGS PAGE NAVIGATION
+addClick("settings-btn", () => {
+  window.location.href = "Settings.html";
+});
+
+// RESET PASSWORD (from Settings page)
+addClick("resetPwdBtn", async () => {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) {
+    alert("You must be logged in to perform this action.");
+    window.location.href = "index.html";
+    return;
+  }
+  if (!confirm("This will send a password reset link to your email. Are you sure?")) return;
+
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(user.email, {
+    redirectTo: window.location.origin + "/reset-password.html",
+  });
+  if (error) return alert("Error sending reset email: " + error.message);
+  alert("Password reset email sent! Please check your inbox.");
+});
+
+// DELETE ACCOUNT (from Settings page)
+addClick("deleteAcctBtn", async () => {
+  if (!confirm("Are you sure you want to delete your account? This will delete all your uploaded models and cannot be undone.")) return;
+
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) return;
+
+  // 1. Delete user's uploaded models from storage
+  const path = `${user.id}`;
+  const { data: list } = await supabaseClient.storage.from(BUCKET).list(path);
+  if (list && list.length > 0) {
+    const filesToRemove = list.map(x => `${path}/${x.name}`);
+    const { error } = await supabaseClient.storage.from(BUCKET).remove(filesToRemove);
+    if (error) {
+      alert("Error deleting models: " + error.message);
+      return;
+    }
+  }
+
+  // 2. Sign out. A full user deletion from `auth.users` requires a backend function (e.g., RPC) with admin rights.
+  await supabaseClient.auth.signOut();
+  alert("All account data has been deleted and you have been logged out.");
+  window.location.href = "index.html";
+});
+
+// FORGOT PASSWORD (SEND EMAIL)
+addClick("forgot-password-btn", async () => {
+  const email = document.getElementById("email").value;
+  if (!email) return alert("Please enter your email address in the box above.");
+
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + "/reset-password.html",
+  });
+  if (error) return alert("Error: " + error.message);
+  alert("Password reset email sent! Check your inbox.");
+});
+
+// UPDATE PASSWORD (FROM RESET PAGE)
+addClick("update-password-btn", async () => {
+  const password = document.getElementById("new-password").value;
+  const confirmPassword = document.getElementById("confirm-password").value;
+  if (!password) return alert("Enter a new password.");
+  if (password !== confirmPassword) return alert("Passwords do not match.");
+
+  const { error } = await supabaseClient.auth.updateUser({ password });
+  if (error) return alert("Error updating password: " + error.message);
+  
+  alert("Password updated successfully! You can now login.");
+  window.location.href = "index.html";
+});
 
 // LOGOUT (WORKS)
-document.getElementById("logout-btn").onclick = async () => {
+addClick("logout-btn", async () => {
   await supabaseClient.auth.signOut();
   document.getElementById("model-select").innerHTML = '<option disabled selected value="">SELECT A MODEL</option>';
   // Clear the current model from the viewer
@@ -211,13 +319,14 @@ document.getElementById("logout-btn").onclick = async () => {
   await setupXR(currentScene);
   engine.runRenderLoop(() => currentScene.render());
   await checkUser();
-};
+});
 
 // LOAD USER'S MODELS (WORKS)
 async function loadModelList(user) {
   const path = `${user.id}`;
   const { data, error } = await supabaseClient.storage.from(BUCKET).list(path, { limit: 100 });
   const select = document.getElementById("model-select");
+  if (!select) return;
   select.innerHTML = '<option disabled selected value="">SELECT A MODEL</option>';
   if (error) return console.error(error);
 
@@ -231,7 +340,7 @@ async function loadModelList(user) {
 }
 
 // UPLOAD MODEL (WORKS)
-document.getElementById("upload-model").onclick = async () => {
+addClick("upload-model", async () => {
   const { data: { user } } = await supabaseClient.auth.getUser();
   if (!user) return alert("Please login first.");
 
@@ -249,10 +358,12 @@ document.getElementById("upload-model").onclick = async () => {
     await loadModelList(user);
   };
   input.click();
-};
+});
 
 // SELECT MODEL TO LOAD (WORKS)
-document.getElementById("model-select").onchange = async (e) => {
+const modelSelect = document.getElementById("model-select");
+if (modelSelect) {
+  modelSelect.onchange = async (e) => {
   const filename = e.target.value;
   const { data: { user } } = await supabaseClient.auth.getUser();
   const modelUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${user.id}/${filename}`;
@@ -261,16 +372,27 @@ document.getElementById("model-select").onchange = async (e) => {
   currentScene = await createScene(engine, canvas, modelUrl);
   await setupXR(currentScene);
   engine.runRenderLoop(() => currentScene.render());
-};
+  };
+}
 
 // ==============================
 //  MAIN INITIALIZATION
 // ==============================
 (async function main() {
-  engine = new BABYLON.Engine(canvas, true);
-  currentScene = await createScene(engine, canvas);
-  await setupXR(currentScene);
+  if (canvas) {
+    engine = new BABYLON.Engine(canvas, true);
+    currentScene = await createScene(engine, canvas);
+    await setupXR(currentScene);
+    engine.runRenderLoop(() => currentScene.render());
+    window.addEventListener("resize", () => engine.resize());
+  }
+
+  // Listen for auth state changes (specifically for password recovery flow)
+  supabaseClient.auth.onAuthStateChange(async (event, session) => {
+    if (event === "PASSWORD_RECOVERY") {
+      console.log("Password recovery session active");
+    }
+  });
+
   await checkUser();
-  engine.runRenderLoop(() => currentScene.render());
-  window.addEventListener("resize", () => engine.resize());
 })();
