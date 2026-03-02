@@ -252,7 +252,7 @@ addClick("resetPwdBtn", async () => {
   if (!confirm("This will send a password reset link to your email. Are you sure?")) return;
 
   const { error } = await supabaseClient.auth.resetPasswordForEmail(user.email, {
-    redirectTo: window.location.origin + "/reset-password.html",
+    redirectTo: new URL("reset-password.html", window.location.href).href,
   });
   if (error) return alert("Error sending reset email: " + error.message);
   alert("Password reset email sent! Please check your inbox.");
@@ -289,7 +289,7 @@ addClick("forgot-password-btn", async () => {
   if (!email) return alert("Please enter your email address in the box above.");
 
   const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-    redirectTo: window.location.origin + "/reset-password.html",
+    redirectTo: new URL("reset-password.html", window.location.href).href,
   });
   if (error) return alert("Error: " + error.message);
   alert("Password reset email sent! Check your inbox.");
@@ -323,10 +323,11 @@ addClick("logout-btn", async () => {
 
 // LOAD USER'S MODELS (WORKS)
 async function loadModelList(user) {
-  const path = `${user.id}`;
-  const { data, error } = await supabaseClient.storage.from(BUCKET).list(path, { limit: 100 });
   const select = document.getElementById("model-select");
   if (!select) return;
+
+  const path = `${user.id}`;
+  const { data, error } = await supabaseClient.storage.from(BUCKET).list(path, { limit: 100 });
   select.innerHTML = '<option disabled selected value="">SELECT A MODEL</option>';
   if (error) return console.error(error);
 
@@ -390,7 +391,10 @@ if (modelSelect) {
   // Listen for auth state changes (specifically for password recovery flow)
   supabaseClient.auth.onAuthStateChange(async (event, session) => {
     if (event === "PASSWORD_RECOVERY") {
-      console.log("Password recovery session active");
+      // Safety: If the recovery link redirects to root/index, force move to reset page
+      if (!window.location.href.includes("reset-password.html")) {
+        window.location.href = "reset-password.html";
+      }
     }
   });
 
