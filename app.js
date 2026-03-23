@@ -20,6 +20,10 @@ function addClick(id, fn) {
 
 async function createScene(engine, canvas, modelUrl = null) {
   const scene = new BABYLON.Scene(engine);
+  
+  // Make the scene background completely transparent so the device camera can show through
+  scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+
   scene.createDefaultEnvironment({ createSkybox: false });
   const camera = new BABYLON.ArcRotateCamera("camera",
     Math.PI / 2, Math.PI / 3, 5, BABYLON.Vector3.Zero(), scene
