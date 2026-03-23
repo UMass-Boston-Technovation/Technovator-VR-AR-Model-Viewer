@@ -35,7 +35,6 @@ async function createScene(engine, canvas, modelUrl = null) {
 
 async function setupXR(scene) {
   const btnXR = document.getElementById("enter-xr");
-  const xrControls = document.getElementById("xr-controls");
   const xrInfo = document.getElementById("xr-info");
   const placementGuide = document.getElementById("placement-guide");
 
@@ -103,53 +102,13 @@ async function setupXR(scene) {
     }
   });
 
-  // ===== XR CONTROLS =====
-  addClick("xr-scale-up", () => {
-    if (modelMesh) {
-      modelMesh.scaling.addInPlace(new BABYLON.Vector3(0.2, 0.2, 0.2));
-    }
-  });
-
-  addClick("xr-scale-down", () => {
-    if (modelMesh) {
-      modelMesh.scaling.subtractInPlace(new BABYLON.Vector3(0.2, 0.2, 0.2));
-      if (modelMesh.scaling.x < 0.1) modelMesh.scaling = new BABYLON.Vector3(0.1, 0.1, 0.1);
-    }
-  });
-
-  addClick("xr-rotate-left", () => {
-    if (modelMesh) {
-      modelMesh.rotation.y -= 0.3;
-    }
-  });
-
-  addClick("xr-rotate-right", () => {
-    if (modelMesh) {
-      modelMesh.rotation.y += 0.3;
-    }
-  });
-
-  addClick("xr-reset", () => {
-    if (modelMesh) {
-      modelMesh.scaling = new BABYLON.Vector3(1, 1, 1);
-      modelMesh.rotation.y = 0;
-      modelMesh.position = new BABYLON.Vector3(0, 0, 0);
-    }
-  });
-
-  addClick("xr-exit", () => {
-    xr.baseExperience.exitXRAsync();
-  });
-
   // ===== XR SESSION HANDLERS =====
   xr.baseExperience.onStateChangedObservable.add((state) => {
     if (state === BABYLON.WebXRState.IN_XR) {
-      xrControls.classList.add("active");
       xrInfo.classList.add("active");
       placementGuide.classList.add("active");
       xrSession = true;
     } else {
-      xrControls.classList.remove("active");
       xrInfo.classList.remove("active");
       placementGuide.classList.remove("active");
       xrSession = false;
