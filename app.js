@@ -11,12 +11,46 @@ const BUCKET = "models";
 //  BABYLON.JS SETUP
 // ==============================
 let engine, currentScene;
+let selectedSessionMode = null;
 const canvas = document.getElementById("renderCanvas");
 
 function addClick(id, fn) {
   const el = document.getElementById(id);
   if (el) el.onclick = fn;
 }
+
+function showXRModeModal() {
+  const modal = document.getElementById("xr-mode-modal");
+  if (modal) modal.style.display = "flex";
+}
+
+function updateXRButton() {
+  const btnXR = document.getElementById("enter-xr");
+  if (!btnXR) return;
+  if (selectedSessionMode) {
+    btnXR.disabled = false;
+    btnXR.style.pointerEvents = "auto";
+    btnXR.innerText = selectedSessionMode === "immersive-vr" ? "Enter VR" : "Enter AR";
+  } else {
+    btnXR.disabled = true;
+    btnXR.style.pointerEvents = "none";
+    btnXR.innerText = "Enter WebXR";
+  }
+}
+
+addClick("btn-choose-vr", () => {
+  selectedSessionMode = "immersive-vr";
+  const modal = document.getElementById("xr-mode-modal");
+  if (modal) modal.style.display = "none";
+  updateXRButton();
+});
+
+addClick("btn-choose-ar", () => {
+  selectedSessionMode = "immersive-ar";
+  const modal = document.getElementById("xr-mode-modal");
+  if (modal) modal.style.display = "none";
+  updateXRButton();
+});
 
 async function createScene(engine, canvas, modelUrl = null) {
   const scene = new BABYLON.Scene(engine);
@@ -44,24 +78,8 @@ async function setupXR(scene) {
 
   if (!("xr" in navigator)) return;
 
-  const arSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-ar");
-  const vrSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-vr");
-  
-  let sessionMode = null;
-  
-  // Prefer VR for VR headsets, fallback to AR for Mobile devices
-  if (vrSupported) {
-    sessionMode = "immersive-vr";
-  } else if (arSupported) {
-    sessionMode = "immersive-ar";
-  }
-
-  if (sessionMode) {
-    btnXR.disabled = false;
-    btnXR.style.pointerEvents = "auto";
-    document.getElementById("xr-wrapper").removeAttribute("title");
-    btnXR.innerText = sessionMode === "immersive-vr" ? "Enter VR" : "Enter Mobile AR";
-  }
+  document.getElementById("xr-wrapper").removeAttribute("title");
+  updateXRButton();
 
   const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
     optionalFeatures: ["local-floor", "bounded-floor", "hit-test", "dom-overlay"],
@@ -103,7 +121,7 @@ async function setupXR(scene) {
 
     try {
       // 1. Try to place on a real-world physical surface in AR
-      if (sessionMode === "immersive-ar" && latestHit) {
+      if (selectedSessionMode === "immersive-ar" && latestHit) {
         if (!modelMesh.rotationQuaternion) {
           modelMesh.rotationQuaternion = BABYLON.Quaternion.Identity();
         }
@@ -167,8 +185,9 @@ async function setupXR(scene) {
   });
 
   btnXR.onclick = async () => {
+    if (!selectedSessionMode) return;
     try {
-      await xr.baseExperience.enterXRAsync(sessionMode, "local-floor");
+      await xr.baseExperience.enterXRAsync(selectedSessionMode, "local-floor");
     } catch (err) {
       alert("XR not supported on this device or browser.");
     }
@@ -191,12 +210,21 @@ async function checkUser() {
     if (uploadBtn) uploadBtn.disabled = false;
     if (logoutBtn) logoutBtn.style.display = "inline-block";
     if (settingsBtn) settingsBtn.disabled = false;
+
+    // Show XR mode modal right after login if not selected yet
+    if (!selectedSessionMode && ("xr" in navigator)) {
+      showXRModeModal();
+    }
+
     await loadModelList(user);
   } else {
     if (authBox) authBox.style.display = "block";
     if (uploadBtn) uploadBtn.disabled = true;
     if (logoutBtn) logoutBtn.style.display = "none";
     if (settingsBtn) settingsBtn.disabled = true;
+
+    selectedSessionMode = null;
+    updateXRButton();
   }
 }
 

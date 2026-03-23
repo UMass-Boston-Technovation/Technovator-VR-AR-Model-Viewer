@@ -23,6 +23,15 @@ input, select { border: 1px solid #333; background: #222; color: #eee; padding: 
   position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.5);
   padding: 10px; border-radius: 6px;
 }
+.modal {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.8); z-index: 1000;
+  align-items: center; justify-content: center;
+}
+.modal-content {
+  background: #222; padding: 20px; border-radius: 8px; text-align: center;
+  border: 1px solid #444; max-width: 90%; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
 .xr-info {
   position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 3;
   background: rgba(0,0,0,0.6); padding: 10px 16px; border-radius: 8px;
