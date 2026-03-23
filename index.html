@@ -16,11 +16,8 @@
     <div><strong>Technovator AR/VR Model Viewer</strong></div>
     <div class="muted">Login to upload and view your 3D models.</div>
     <div class="row">
-      <div id="vr-wrapper" style="display:inline-block" title="Feature only available on VR devices">
-        <button id="enter-vr" class="btn" disabled style="pointer-events:none">Enter VR</button>
-      </div>
-      <div id="ar-wrapper" style="display:inline-block" title="Feature only available on mobile AR devices">
-        <button id="enter-ar" class="btn" disabled style="pointer-events:none">Enter AR</button>
+      <div id="xr-wrapper" style="display:inline-block" title="Feature only available on WebXR devices (Mobile/VR)">
+        <button id="enter-xr" class="btn" disabled style="pointer-events:none">Enter WebXR</button>
       </div>
       <select id="model-select" class="btn">
         <option disabled selected value="">SELECT A MODEL</option>
@@ -39,17 +36,17 @@
     <button id="forgot-password-btn" class="btn" style="background: transparent; border: none; font-size: 12px; text-decoration: underline; margin-top: 5px; width: 100%;">Forgot Password?</button>
   </div>
 
-  <div class="ar-controls" id="ar-controls">
-    <button id="ar-scale-up" class="btn">Scale +</button>
-    <button id="ar-scale-down" class="btn">Scale -</button>
-    <button id="ar-rotate-left" class="btn">Rotate ←</button>
-    <button id="ar-rotate-right" class="btn">Rotate →</button>
-    <button id="ar-reset" class="btn">Reset</button>
-    <button id="ar-exit" class="btn">Exit AR</button>
+  <div class="xr-controls" id="xr-controls">
+    <button id="xr-scale-up" class="btn">Scale +</button>
+    <button id="xr-scale-down" class="btn">Scale -</button>
+    <button id="xr-rotate-left" class="btn">Rotate ←</button>
+    <button id="xr-rotate-right" class="btn">Rotate →</button>
+    <button id="xr-reset" class="btn">Reset</button>
+    <button id="xr-exit" class="btn">Exit</button>
   </div>
 
-  <div class="ar-info" id="ar-info">
-    <div id="ar-info-text">Tap to place model</div>
+  <div class="xr-info" id="xr-info">
+    <div id="xr-info-text">Tap to place model</div>
   </div>
 
   <div class="placement-guide" id="placement-guide"></div>

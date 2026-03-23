@@ -34,25 +34,27 @@ async function createScene(engine, canvas, modelUrl = null) {
 }
 
 async function setupXR(scene) {
-  const btnVR = document.getElementById("enter-vr");
-  const btnAR = document.getElementById("enter-ar");
-  const arControls = document.getElementById("ar-controls");
-  const arInfo = document.getElementById("ar-info");
+  const btnXR = document.getElementById("enter-xr");
+  const xrControls = document.getElementById("xr-controls");
+  const xrInfo = document.getElementById("xr-info");
   const placementGuide = document.getElementById("placement-guide");
 
   if (!("xr" in navigator)) return;
 
   const arSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-ar");
   const vrSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-vr");
-  if (vrSupported) {
-    btnVR.disabled = false;
-    btnVR.style.pointerEvents = "auto";
-    document.getElementById("vr-wrapper").removeAttribute("title");
-  }
+  
+  let sessionMode = null;
   if (arSupported) {
-    btnAR.disabled = false;
-    btnAR.style.pointerEvents = "auto";
-    document.getElementById("ar-wrapper").removeAttribute("title");
+    sessionMode = "immersive-ar";
+  } else if (vrSupported) {
+    sessionMode = "immersive-vr";
+  }
+
+  if (sessionMode) {
+    btnXR.disabled = false;
+    btnXR.style.pointerEvents = "auto";
+    document.getElementById("xr-wrapper").removeAttribute("title");
   }
 
   const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
@@ -60,18 +62,18 @@ async function setupXR(scene) {
     domOverlay: { root: document.body }
   });
 
-  let arSession = null;
+  let xrSession = null;
   let modelMesh = null;
 
-  // ===== AR BEHAVIORS =====
+  // ===== XR BEHAVIORS =====
   const pointerDragBehavior = new BABYLON.PointerDragBehavior({ dragPlaneNormal: new BABYLON.Vector3(0, 1, 0) });
   pointerDragBehavior.useObjectOrientationForDragging = false;
 
   const scaleBehavior = new BABYLON.MultiPointerScaleBehavior();
 
-  // ===== AR PLACEMENT (screen / scene pick fallback) =====
+  // ===== XR PLACEMENT (screen / scene pick fallback) =====
   canvas.addEventListener("click", async (e) => {
-    if (!arSession || !xr || !xr.baseExperience) return;
+    if (!xrSession || !xr || !xr.baseExperience) return;
 
     // Only place if a model exists and it's not already placed (parent === null)
     if (!modelMesh || modelMesh.parent !== null) return;
@@ -82,7 +84,7 @@ async function setupXR(scene) {
       if (pick && pick.hit && pick.pickedPoint) {
         modelMesh.position.copyFrom(pick.pickedPoint);
         placementGuide.classList.remove("active");
-        arInfo.querySelector("#ar-info-text").textContent = "Model placed! Use gestures to adjust.";
+        xrInfo.querySelector("#xr-info-text").textContent = "Model placed! Use gestures to adjust.";
         return;
       }
 
@@ -92,42 +94,42 @@ async function setupXR(scene) {
       const fallbackPos = camPos.add(forward.scale(1.5));
       modelMesh.position = fallbackPos;
       placementGuide.classList.remove("active");
-      arInfo.querySelector("#ar-info-text").textContent = "Model placed!";
+      xrInfo.querySelector("#xr-info-text").textContent = "Model placed!";
     } catch (err) {
-      console.warn("AR placement failed, using fallback position:", err);
+      console.warn("XR placement failed, using fallback position:", err);
       modelMesh.position = new BABYLON.Vector3(0, -0.5, -1.5);
       placementGuide.classList.remove("active");
-      arInfo.querySelector("#ar-info-text").textContent = "Model placed!";
+      xrInfo.querySelector("#xr-info-text").textContent = "Model placed!";
     }
   });
 
-  // ===== AR CONTROLS =====
-  addClick("ar-scale-up", () => {
+  // ===== XR CONTROLS =====
+  addClick("xr-scale-up", () => {
     if (modelMesh) {
       modelMesh.scaling.addInPlace(new BABYLON.Vector3(0.2, 0.2, 0.2));
     }
   });
 
-  addClick("ar-scale-down", () => {
+  addClick("xr-scale-down", () => {
     if (modelMesh) {
       modelMesh.scaling.subtractInPlace(new BABYLON.Vector3(0.2, 0.2, 0.2));
       if (modelMesh.scaling.x < 0.1) modelMesh.scaling = new BABYLON.Vector3(0.1, 0.1, 0.1);
     }
   });
 
-  addClick("ar-rotate-left", () => {
+  addClick("xr-rotate-left", () => {
     if (modelMesh) {
       modelMesh.rotation.y -= 0.3;
     }
   });
 
-  addClick("ar-rotate-right", () => {
+  addClick("xr-rotate-right", () => {
     if (modelMesh) {
       modelMesh.rotation.y += 0.3;
     }
   });
 
-  addClick("ar-reset", () => {
+  addClick("xr-reset", () => {
     if (modelMesh) {
       modelMesh.scaling = new BABYLON.Vector3(1, 1, 1);
       modelMesh.rotation.y = 0;
@@ -135,30 +137,30 @@ async function setupXR(scene) {
     }
   });
 
-  addClick("ar-exit", () => {
+  addClick("xr-exit", () => {
     xr.baseExperience.exitXRAsync();
   });
 
   // ===== XR SESSION HANDLERS =====
   xr.baseExperience.onStateChangedObservable.add((state) => {
     if (state === BABYLON.WebXRState.IN_XR) {
-      arControls.classList.add("active");
-      arInfo.classList.add("active");
+      xrControls.classList.add("active");
+      xrInfo.classList.add("active");
       placementGuide.classList.add("active");
-      arSession = true;
+      xrSession = true;
     } else {
-      arControls.classList.remove("active");
-      arInfo.classList.remove("active");
+      xrControls.classList.remove("active");
+      xrInfo.classList.remove("active");
       placementGuide.classList.remove("active");
-      arSession = false;
+      xrSession = false;
       if (modelMesh) modelMesh.dispose();
       modelMesh = null;
     }
   });
 
-  // Store reference to modelMesh in scene for AR mode
+  // Store reference to modelMesh in scene for XR mode
   scene.onBeforeCameraRenderObservable.add(() => {
-    if (arSession && !modelMesh && scene.meshes.length > 1) {
+    if (xrSession && !modelMesh && scene.meshes.length > 1) {
       // Auto-detect loaded model
       modelMesh = scene.meshes.find(m => m !== scene.getMeshByName("default") && m.name !== "");
       if (modelMesh) {
@@ -168,12 +170,11 @@ async function setupXR(scene) {
     }
   });
 
-  btnVR.onclick = async () => xr.baseExperience.enterXRAsync("immersive-vr", "local-floor");
-  btnAR.onclick = async () => {
+  btnXR.onclick = async () => {
     try {
-      await xr.baseExperience.enterXRAsync("immersive-ar", "local");
+      await xr.baseExperience.enterXRAsync(sessionMode, "local-floor");
     } catch (err) {
-      alert("AR not supported on this device or browser.");
+      alert("XR not supported on this device or browser.");
     }
   };
 }
