@@ -34,8 +34,7 @@ async function createScene(engine, canvas, modelUrl = null) {
 }
 
 async function setupXR(scene) {
-  const btnVR = document.getElementById("enter-vr");
-  const btnAR = document.getElementById("enter-ar");
+  const btnXR = document.getElementById("enter-xr");
   const arControls = document.getElementById("ar-controls");
   const arInfo = document.getElementById("ar-info");
   const placementGuide = document.getElementById("placement-guide");
@@ -44,15 +43,19 @@ async function setupXR(scene) {
 
   const arSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-ar");
   const vrSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-vr");
-  if (vrSupported) {
-    btnVR.disabled = false;
-    btnVR.style.pointerEvents = "auto";
-    document.getElementById("vr-wrapper").removeAttribute("title");
-  }
+
+  let sessionMode = null;
   if (arSupported) {
-    btnAR.disabled = false;
-    btnAR.style.pointerEvents = "auto";
-    document.getElementById("ar-wrapper").removeAttribute("title");
+    sessionMode = "immersive-ar";
+  } else if (vrSupported) {
+    sessionMode = "immersive-vr";
+  }
+
+  if (sessionMode) {
+    btnXR.disabled = false;
+    btnXR.style.pointerEvents = "auto";
+    document.getElementById("xr-wrapper").removeAttribute("title");
+    btnXR.innerText = sessionMode === "immersive-ar" ? "Enter AR" : "Enter VR";
   }
 
   const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
@@ -62,59 +65,12 @@ async function setupXR(scene) {
 
   let arSession = null;
   let modelMesh = null;
-  let xrUIPlane = null;
 
   // ===== AR BEHAVIORS =====
   const pointerDragBehavior = new BABYLON.PointerDragBehavior({ dragPlaneNormal: new BABYLON.Vector3(0, 1, 0) });
   pointerDragBehavior.useObjectOrientationForDragging = false;
 
   const scaleBehavior = new BABYLON.MultiPointerScaleBehavior();
-
-  // ===== IN-XR GUI =====
-  function setupInWorldUI() {
-    if (xrUIPlane) return;
-
-    // Create a 3D plane to host the 2D GUI
-    xrUIPlane = BABYLON.MeshBuilder.CreatePlane("xrUIPlane", { width: 0.3, height: 0.4 }, scene);
-    xrUIPlane.position = new BABYLON.Vector3(0, 0, 1.5); 
-    xrUIPlane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y; // Make the UI always face the user
-
-    // Create the AdvancedDynamicTexture mapped to the mesh
-    const adt = BABYLON.GUI.AdvancedDynamicTexture.CreateForMesh(xrUIPlane);
-    
-    const panel = new BABYLON.GUI.StackPanel();
-    panel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-    adt.addControl(panel);
-    
-    const createBtn = (text, onClick) => {
-      const btn = BABYLON.GUI.Button.CreateSimpleButton("btn_" + text, text);
-      btn.width = "80%";
-      btn.height = "50px";
-      btn.color = "white";
-      btn.background = "rgba(40, 40, 40, 0.8)";
-      btn.cornerRadius = 10;
-      btn.thickness = 2;
-      btn.paddingBottom = "5px";
-      btn.onPointerUpObservable.add(onClick);
-      panel.addControl(btn);
-    };
-
-    createBtn("Scale Up", () => { if (modelMesh) modelMesh.scaling.addInPlace(new BABYLON.Vector3(0.2, 0.2, 0.2)); });
-    createBtn("Scale Down", () => {
-      if (modelMesh) {
-        modelMesh.scaling.subtractInPlace(new BABYLON.Vector3(0.2, 0.2, 0.2));
-        if (modelMesh.scaling.x < 0.1) modelMesh.scaling = new BABYLON.Vector3(0.1, 0.1, 0.1);
-      }
-    });
-    createBtn("Rotate Left", () => { if (modelMesh) modelMesh.rotation.y -= 0.3; });
-    createBtn("Rotate Right", () => { if (modelMesh) modelMesh.rotation.y += 0.3; });
-    createBtn("Reset", () => {
-      if (modelMesh) {
-        modelMesh.scaling = new BABYLON.Vector3(1, 1, 1);
-        modelMesh.rotation.y = 0;
-      }
-    });
-  }
 
   // ===== AR PLACEMENT (screen / scene pick fallback) =====
   canvas.addEventListener("click", async (e) => {
@@ -130,10 +86,6 @@ async function setupXR(scene) {
         modelMesh.position.copyFrom(pick.pickedPoint);
         placementGuide.classList.remove("active");
         arInfo.querySelector("#ar-info-text").textContent = "Model placed! Use gestures to adjust.";
-        
-        if (xrUIPlane) {
-          xrUIPlane.position = pick.pickedPoint.add(new BABYLON.Vector3(0, 0.6, 0)); // Hover menu directly above the model
-        }
         return;
       }
 
@@ -144,17 +96,11 @@ async function setupXR(scene) {
       modelMesh.position = fallbackPos;
       placementGuide.classList.remove("active");
       arInfo.querySelector("#ar-info-text").textContent = "Model placed!";
-      if (xrUIPlane) {
-        xrUIPlane.position = fallbackPos.add(new BABYLON.Vector3(0, 0.6, 0));
-      }
     } catch (err) {
       console.warn("AR placement failed, using fallback position:", err);
       modelMesh.position = new BABYLON.Vector3(0, -0.5, -1.5);
       placementGuide.classList.remove("active");
       arInfo.querySelector("#ar-info-text").textContent = "Model placed!";
-      if (xrUIPlane) {
-        xrUIPlane.position = modelMesh.position.add(new BABYLON.Vector3(0, 0.6, 0));
-      }
     }
   });
 
@@ -203,7 +149,6 @@ async function setupXR(scene) {
       arInfo.classList.add("active");
       placementGuide.classList.add("active");
       arSession = true;
-      setupInWorldUI();
     } else {
       arControls.classList.remove("active");
       arInfo.classList.remove("active");
@@ -211,10 +156,6 @@ async function setupXR(scene) {
       arSession = false;
       if (modelMesh) modelMesh.dispose();
       modelMesh = null;
-      if (xrUIPlane) {
-        xrUIPlane.dispose();
-        xrUIPlane = null;
-      }
     }
   });
 
@@ -230,12 +171,11 @@ async function setupXR(scene) {
     }
   });
 
-  btnVR.onclick = async () => xr.baseExperience.enterXRAsync("immersive-vr", "local-floor");
-  btnAR.onclick = async () => {
+  btnXR.onclick = async () => {
     try {
-      await xr.baseExperience.enterXRAsync("immersive-ar", "local");
+      await xr.baseExperience.enterXRAsync(sessionMode, "local-floor");
     } catch (err) {
-      alert("AR not supported on this device or browser.");
+      alert("XR not supported on this device or browser.");
     }
   };
 }
