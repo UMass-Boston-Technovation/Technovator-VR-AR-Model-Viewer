@@ -34,7 +34,8 @@ async function createScene(engine, canvas, modelUrl = null) {
 }
 
 async function setupXR(scene) {
-  const btnXR = document.getElementById("enter-xr");
+  const btnVR = document.getElementById("enter-vr");
+  const btnAR = document.getElementById("enter-ar");
   const arControls = document.getElementById("ar-controls");
   const arInfo = document.getElementById("ar-info");
   const placementGuide = document.getElementById("placement-guide");
@@ -43,19 +44,15 @@ async function setupXR(scene) {
 
   const arSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-ar");
   const vrSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-vr");
-
-  let sessionMode = null;
-  if (arSupported) {
-    sessionMode = "immersive-ar";
-  } else if (vrSupported) {
-    sessionMode = "immersive-vr";
+  if (vrSupported) {
+    btnVR.disabled = false;
+    btnVR.style.pointerEvents = "auto";
+    document.getElementById("vr-wrapper").removeAttribute("title");
   }
-
-  if (sessionMode) {
-    btnXR.disabled = false;
-    btnXR.style.pointerEvents = "auto";
-    document.getElementById("xr-wrapper").removeAttribute("title");
-    btnXR.innerText = sessionMode === "immersive-ar" ? "Enter AR" : "Enter VR";
+  if (arSupported) {
+    btnAR.disabled = false;
+    btnAR.style.pointerEvents = "auto";
+    document.getElementById("ar-wrapper").removeAttribute("title");
   }
 
   const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
@@ -171,11 +168,12 @@ async function setupXR(scene) {
     }
   });
 
-  btnXR.onclick = async () => {
+  btnVR.onclick = async () => xr.baseExperience.enterXRAsync("immersive-vr", "local-floor");
+  btnAR.onclick = async () => {
     try {
-      await xr.baseExperience.enterXRAsync(sessionMode, "local-floor");
+      await xr.baseExperience.enterXRAsync("immersive-ar", "local");
     } catch (err) {
-      alert("XR not supported on this device or browser.");
+      alert("AR not supported on this device or browser.");
     }
   };
 }

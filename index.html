@@ -16,8 +16,11 @@
     <div><strong>Technovator AR/VR Model Viewer</strong></div>
     <div class="muted">Login to upload and view your 3D models.</div>
     <div class="row">
-      <div id="xr-wrapper" style="display:inline-block" title="Feature only available on XR devices">
-        <button id="enter-xr" class="btn" disabled style="pointer-events:none">Enter XR</button>
+      <div id="vr-wrapper" style="display:inline-block" title="Feature only available on VR devices">
+        <button id="enter-vr" class="btn" disabled style="pointer-events:none">Enter VR</button>
+      </div>
+      <div id="ar-wrapper" style="display:inline-block" title="Feature only available on mobile AR devices">
+        <button id="enter-ar" class="btn" disabled style="pointer-events:none">Enter AR</button>
       </div>
       <select id="model-select" class="btn">
         <option disabled selected value="">SELECT A MODEL</option>
@@ -42,7 +45,7 @@
     <button id="ar-rotate-left" class="btn">Rotate ←</button>
     <button id="ar-rotate-right" class="btn">Rotate →</button>
     <button id="ar-reset" class="btn">Reset</button>
-    <button id="ar-exit" class="btn">Exit XR</button>
+    <button id="ar-exit" class="btn">Exit AR</button>
   </div>
 
   <div class="ar-info" id="ar-info">
