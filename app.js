@@ -48,16 +48,19 @@ async function setupXR(scene) {
   const vrSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync("immersive-vr");
   
   let sessionMode = null;
-  if (arSupported) {
-    sessionMode = "immersive-ar";
-  } else if (vrSupported) {
+  
+  // Prefer VR for VR headsets, fallback to AR for Mobile devices
+  if (vrSupported) {
     sessionMode = "immersive-vr";
+  } else if (arSupported) {
+    sessionMode = "immersive-ar";
   }
 
   if (sessionMode) {
     btnXR.disabled = false;
     btnXR.style.pointerEvents = "auto";
     document.getElementById("xr-wrapper").removeAttribute("title");
+    btnXR.innerText = sessionMode === "immersive-vr" ? "Enter VR" : "Enter Mobile AR";
   }
 
   const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
@@ -74,6 +77,23 @@ async function setupXR(scene) {
 
   const scaleBehavior = new BABYLON.MultiPointerScaleBehavior();
 
+  // ===== AR REAL-WORLD HIT TESTING =====
+  let hitTest = null;
+  let latestHit = null;
+  try {
+    // Enable tracking of real-world physical surfaces
+    hitTest = xr.baseExperience.featuresManager.enableFeature(BABYLON.WebXRFeatureName.HIT_TEST, "latest");
+    hitTest.onHitTestResultObservable.add((results) => {
+      if (results.length) {
+        latestHit = results[0];
+      } else {
+        latestHit = null;
+      }
+    });
+  } catch (err) {
+    console.warn("AR Hit-test not supported on this device.");
+  }
+
   // ===== XR PLACEMENT (screen / scene pick fallback) =====
   canvas.addEventListener("click", async (e) => {
     if (!xrSession || !xr || !xr.baseExperience) return;
@@ -82,7 +102,20 @@ async function setupXR(scene) {
     if (!modelMesh || modelMesh.parent !== null) return;
 
     try {
-      // Try a normal scene pick at the pointer to get a world point on any hittable mesh
+      // 1. Try to place on a real-world physical surface in AR
+      if (sessionMode === "immersive-ar" && latestHit) {
+        if (!modelMesh.rotationQuaternion) {
+          modelMesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+        }
+        const dummyScale = new BABYLON.Vector3();
+        latestHit.transformationMatrix.decompose(dummyScale, modelMesh.rotationQuaternion, modelMesh.position);
+        
+        if (placementGuide) placementGuide.classList.remove("active");
+        if (xrInfo) xrInfo.querySelector("#xr-info-text").textContent = "Model placed on surface! Use gestures to adjust.";
+        return;
+      }
+
+      // 2. Try a normal scene pick at the pointer to get a world point on any hittable virtual mesh
       const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh !== modelMesh);
       if (pick && pick.hit && pick.pickedPoint) {
         modelMesh.position.copyFrom(pick.pickedPoint);
