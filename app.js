@@ -82,8 +82,8 @@ async function setupXR(scene) {
       const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh !== modelMesh);
       if (pick && pick.hit && pick.pickedPoint) {
         modelMesh.position.copyFrom(pick.pickedPoint);
-        placementGuide.classList.remove("active");
-        xrInfo.querySelector("#xr-info-text").textContent = "Model placed! Use gestures to adjust.";
+        if (placementGuide) placementGuide.classList.remove("active");
+        if (xrInfo) xrInfo.querySelector("#xr-info-text").textContent = "Model placed! Use gestures to adjust.";
         return;
       }
 
@@ -92,25 +92,25 @@ async function setupXR(scene) {
       const camPos = scene.activeCamera.position;
       const fallbackPos = camPos.add(forward.scale(1.5));
       modelMesh.position = fallbackPos;
-      placementGuide.classList.remove("active");
-      xrInfo.querySelector("#xr-info-text").textContent = "Model placed!";
+      if (placementGuide) placementGuide.classList.remove("active");
+      if (xrInfo) xrInfo.querySelector("#xr-info-text").textContent = "Model placed!";
     } catch (err) {
       console.warn("XR placement failed, using fallback position:", err);
       modelMesh.position = new BABYLON.Vector3(0, -0.5, -1.5);
-      placementGuide.classList.remove("active");
-      xrInfo.querySelector("#xr-info-text").textContent = "Model placed!";
+      if (placementGuide) placementGuide.classList.remove("active");
+      if (xrInfo) xrInfo.querySelector("#xr-info-text").textContent = "Model placed!";
     }
   });
 
   // ===== XR SESSION HANDLERS =====
   xr.baseExperience.onStateChangedObservable.add((state) => {
     if (state === BABYLON.WebXRState.IN_XR) {
-      xrInfo.classList.add("active");
-      placementGuide.classList.add("active");
+      if (xrInfo) xrInfo.classList.add("active");
+      if (placementGuide) placementGuide.classList.add("active");
       xrSession = true;
     } else {
-      xrInfo.classList.remove("active");
-      placementGuide.classList.remove("active");
+      if (xrInfo) xrInfo.classList.remove("active");
+      if (placementGuide) placementGuide.classList.remove("active");
       xrSession = false;
       if (modelMesh) modelMesh.dispose();
       modelMesh = null;

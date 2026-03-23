@@ -23,12 +23,12 @@ input, select { border: 1px solid #333; background: #222; color: #eee; padding: 
   position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.5);
   padding: 10px; border-radius: 6px;
 }
-.ar-info {
+.xr-info {
   position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 3;
   background: rgba(0,0,0,0.6); padding: 10px 16px; border-radius: 8px;
   font-size: 12px; text-align: center; display: none;
 }
-.ar-info.active { display: block; }
+.xr-info.active { display: block; }
 .placement-guide {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: 60px; height: 60px; border: 2px dashed #0ff;
