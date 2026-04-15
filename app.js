@@ -263,7 +263,7 @@ addClick("signup-btn", async () => {
 
 // SETTINGS PAGE NAVIGATION
 addClick("settings-btn", () => {
-  window.location.href = "Settings.html";
+  window.location.href = "settings.html";
 });
 
 // RESET PASSWORD (from Settings page)
