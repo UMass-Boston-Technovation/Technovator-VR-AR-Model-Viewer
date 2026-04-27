@@ -65,7 +65,13 @@ async function createScene(engine, canvas, modelUrl = null) {
 
   if (modelUrl) {
     const result = await BABYLON.SceneLoader.ImportMeshAsync("", modelUrl, "", scene);
-    scene._modelRoot = result.meshes[0] ?? null;
+    if (result.meshes.length > 0) {
+      result.meshes.forEach(m => { m.isPickable = true; });
+      // For GLB the __root__ TransformNode parents all meshes; use the first mesh's
+      // parent if it is itself a pickable AbstractMesh, otherwise use the first mesh.
+      const first = result.meshes[0];
+      scene._modelRoot = (first.parent instanceof BABYLON.AbstractMesh) ? first.parent : first;
+    }
   }
   return scene;
 }
@@ -78,16 +84,16 @@ async function setupXR(scene) {
   const repositionBtn = document.getElementById("ar-reposition-btn");
 
   if (!("xr" in navigator)) return;
-
   document.getElementById("xr-wrapper").removeAttribute("title");
   updateXRButton();
 
   let xr = null;
-  let arClickHandler = null;
   let twistObserver = null;
 
   function getModelRoot() {
-    return scene._modelRoot || scene.meshes.find(m =>
+    // Prefer stored root from import; fall back to first renderable mesh
+    if (scene._modelRoot) return scene._modelRoot;
+    return scene.meshes.find(m =>
       m.getTotalVertices() > 0 &&
       m.name !== "__root__" &&
       m.name !== "" &&
@@ -95,18 +101,16 @@ async function setupXR(scene) {
     );
   }
 
-  function setInfoText(text) {
-    if (xrInfoText) xrInfoText.textContent = text;
-  }
+  function setInfoText(t) { if (xrInfoText) xrInfoText.textContent = t; }
 
   function normalizeModelSize(mesh, targetMeters) {
-    const bounds = mesh.getHierarchyBoundingVectors(true);
-    const size = bounds.max.subtract(bounds.min).length();
+    const b = mesh.getHierarchyBoundingVectors(true);
+    const size = b.max.subtract(b.min).length();
     if (size > 0) mesh.scaling.setAll(targetMeters / size);
   }
 
   function rotateMeshY(mesh, delta) {
-    // rotationQuaternion must be used if set (decompose sets it via hit-test)
+    // hit-test decompose sets rotationQuaternion; must use it or rotation is ignored
     if (mesh.rotationQuaternion) {
       mesh.rotationQuaternion = BABYLON.Quaternion.RotationAxis(
         BABYLON.Vector3.Up(), delta
@@ -119,13 +123,10 @@ async function setupXR(scene) {
   btnXR.onclick = async () => {
     if (!selectedSessionMode) return;
 
-    // Clean up previous XR experience
-    if (arClickHandler) { canvas.removeEventListener("click", arClickHandler); arClickHandler = null; }
     if (twistObserver) { scene.onPointerObservable.remove(twistObserver); twistObserver = null; }
     if (xr) {
       try { await xr.baseExperience.exitXRAsync(); } catch {}
-      xr.dispose();
-      xr = null;
+      xr.dispose(); xr = null;
     }
 
     const isVR = selectedSessionMode === "immersive-vr";
@@ -145,7 +146,6 @@ async function setupXR(scene) {
         ...(isVR ? {} : { domOverlay: { root: document.body } }),
       });
 
-      // AR: surface hit-testing so the model snaps to real-world planes
       let latestHit = null;
       if (!isVR) {
         try {
@@ -156,7 +156,6 @@ async function setupXR(scene) {
         } catch (e) { console.warn("Hit-test unavailable:", e); }
       }
 
-      // VR: controller laser-pointer selection
       if (isVR) {
         try {
           xr.baseExperience.featuresManager.enableFeature(
@@ -166,115 +165,146 @@ async function setupXR(scene) {
         } catch (e) { console.warn("VR pointer selection unavailable:", e); }
       }
 
+      // Shared across state-change callbacks for AR lifecycle management
+      let followObserver = null;
+      let placeTapObserver = null;
+
       xr.baseExperience.onStateChangedObservable.add(state => {
         if (state === BABYLON.WebXRState.IN_XR) {
           if (xrInfo) xrInfo.classList.add("active");
           const mesh = getModelRoot();
-          if (!mesh) return;
+
+          if (!mesh) {
+            setInfoText("Select a model first");
+            if (xrInfo) xrInfo.classList.add("active");
+            return;
+          }
 
           mesh.behaviors.slice().forEach(b => mesh.removeBehavior(b));
+          mesh.setEnabled(true);
 
           if (isVR) {
+            // ── VR MODE ──
             normalizeModelSize(mesh, 1.0);
             mesh.position = new BABYLON.Vector3(0, 1.2, -1.5);
             mesh.addBehavior(new BABYLON.SixDofDragBehavior());
             mesh.addBehavior(new BABYLON.MultiPointerScaleBehavior());
+
           } else {
-            // AR: hide model until user taps to place it
+            // ── AR MODE ──
             normalizeModelSize(mesh, 0.3);
-            mesh.setEnabled(false);
-            if (placementGuide) placementGuide.classList.add("active");
-            if (repositionBtn) repositionBtn.style.display = "none";
-            setInfoText("Point at a flat surface and tap to place");
+            let placed = false;
+            let activePointerCount = 0;
 
-            // One-finger drag slides model along its horizontal plane
-            const drag = new BABYLON.PointerDragBehavior({ dragPlaneNormal: new BABYLON.Vector3(0, 1, 0) });
-            drag.useObjectOrientationForDragging = false;
-            mesh.addBehavior(drag);
-
-            // Two-finger pinch scales the model
+            // Attach pinch-to-scale — works before and after placement
             mesh.addBehavior(new BABYLON.MultiPointerScaleBehavior());
 
-            // Two-finger twist rotates the model around Y
-            const pointers = new Map();
+            // Two-finger twist: rotate around Y (only when placed)
+            const twistPointers = new Map();
             let lastTwistAngle = null;
             twistObserver = scene.onPointerObservable.add(evt => {
               const { type, event } = evt;
               const pid = event.pointerId;
               if (type === BABYLON.PointerEventTypes.POINTERDOWN) {
-                pointers.set(pid, { x: event.clientX, y: event.clientY });
-                if (pointers.size < 2) lastTwistAngle = null;
+                twistPointers.set(pid, { x: event.clientX, y: event.clientY });
+                if (twistPointers.size < 2) lastTwistAngle = null;
               } else if (type === BABYLON.PointerEventTypes.POINTERUP || type === BABYLON.PointerEventTypes.POINTEROUT) {
-                pointers.delete(pid);
+                twistPointers.delete(pid);
                 lastTwistAngle = null;
-              } else if (type === BABYLON.PointerEventTypes.POINTERMOVE && pointers.size >= 2) {
-                pointers.set(pid, { x: event.clientX, y: event.clientY });
-                const [p1, p2] = [...pointers.values()];
+              } else if (type === BABYLON.PointerEventTypes.POINTERMOVE && twistPointers.size >= 2 && placed) {
+                twistPointers.set(pid, { x: event.clientX, y: event.clientY });
+                const [p1, p2] = [...twistPointers.values()];
                 const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
                 if (lastTwistAngle !== null) rotateMeshY(mesh, angle - lastTwistAngle);
                 lastTwistAngle = angle;
               }
             });
+
+            function enterPlacementMode() {
+              placed = false;
+              activePointerCount = 0;
+              mesh.behaviors
+                .filter(b => b instanceof BABYLON.PointerDragBehavior)
+                .forEach(b => mesh.removeBehavior(b));
+              if (placementGuide) placementGuide.classList.add("active");
+              if (repositionBtn) repositionBtn.style.display = "none";
+              setInfoText("Point at a flat surface and tap to place");
+
+              // Model floats on the detected surface in real-time while scanning
+              if (!followObserver) {
+                followObserver = scene.onBeforeRenderObservable.add(() => {
+                  if (placed || !latestHit) return;
+                  if (!mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+                  latestHit.transformationMatrix.decompose(
+                    new BABYLON.Vector3(), mesh.rotationQuaternion, mesh.position
+                  );
+                });
+              }
+            }
+
+            function enterInteractionMode() {
+              // Snap to current surface position at moment of tap
+              if (latestHit) {
+                if (!mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+                latestHit.transformationMatrix.decompose(
+                  new BABYLON.Vector3(), mesh.rotationQuaternion, mesh.position
+                );
+              } else if (mesh.position.lengthSquared() < 0.001) {
+                // No surface detected — place 1.5 m in front of camera
+                const fwd = scene.activeCamera.getForwardRay().direction;
+                mesh.position = scene.activeCamera.position.add(fwd.scale(1.5));
+              }
+
+              placed = true;
+              if (followObserver) {
+                scene.onBeforeRenderObservable.remove(followObserver);
+                followObserver = null;
+              }
+
+              const drag = new BABYLON.PointerDragBehavior({ dragPlaneNormal: new BABYLON.Vector3(0, 1, 0) });
+              drag.useObjectOrientationForDragging = false;
+              mesh.addBehavior(drag);
+
+              if (placementGuide) placementGuide.classList.remove("active");
+              if (repositionBtn) repositionBtn.style.display = "inline-block";
+              setInfoText("Drag • Pinch to scale • Twist to rotate");
+            }
+
+            // Tap detection via scene observable — canvas.click does NOT fire in WebXR
+            placeTapObserver = scene.onPointerObservable.add(evt => {
+              if (evt.type === BABYLON.PointerEventTypes.POINTERDOWN) {
+                activePointerCount++;
+              } else if (evt.type === BABYLON.PointerEventTypes.POINTERUP) {
+                activePointerCount = Math.max(0, activePointerCount - 1);
+                // Single finger released with no remaining fingers = tap → lock placement
+                if (!placed && activePointerCount === 0) enterInteractionMode();
+              }
+            });
+
+            if (repositionBtn) {
+              repositionBtn.onclick = () => { if (placed) enterPlacementMode(); };
+            }
+
+            enterPlacementMode();
           }
+
         } else {
+          // Session ending — tear down all per-session observers
+          if (followObserver) { scene.onBeforeRenderObservable.remove(followObserver); followObserver = null; }
+          if (placeTapObserver) { scene.onPointerObservable.remove(placeTapObserver); placeTapObserver = null; }
+          if (twistObserver) { scene.onPointerObservable.remove(twistObserver); twistObserver = null; }
           if (xrInfo) xrInfo.classList.remove("active");
           if (placementGuide) placementGuide.classList.remove("active");
           if (repositionBtn) repositionBtn.style.display = "none";
           if (isVR) scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
-          if (twistObserver) { scene.onPointerObservable.remove(twistObserver); twistObserver = null; }
         }
       });
 
-      // AR: tap-to-place handler — only fires once until user hits Reposition
-      if (!isVR) {
-        let placed = false;
-
-        if (repositionBtn) {
-          repositionBtn.onclick = () => {
-            const mesh = getModelRoot();
-            if (!mesh) return;
-            placed = false;
-            mesh.setEnabled(false);
-            if (placementGuide) placementGuide.classList.add("active");
-            repositionBtn.style.display = "none";
-            setInfoText("Point at a flat surface and tap to place");
-          };
-        }
-
-        arClickHandler = () => {
-          if (!xr || xr.baseExperience.state !== BABYLON.WebXRState.IN_XR || placed) return;
-          const mesh = getModelRoot();
-          if (!mesh) return;
-          try {
-            if (latestHit) {
-              if (!mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
-              latestHit.transformationMatrix.decompose(new BABYLON.Vector3(), mesh.rotationQuaternion, mesh.position);
-            } else {
-              const pick = scene.pick(scene.pointerX, scene.pointerY, m => m !== mesh);
-              if (pick?.hit && pick.pickedPoint) {
-                mesh.position.copyFrom(pick.pickedPoint);
-              } else {
-                const fwd = scene.activeCamera.getForwardRay().direction;
-                mesh.position = scene.activeCamera.position.add(fwd.scale(1.5));
-              }
-            }
-          } catch {
-            mesh.position = new BABYLON.Vector3(0, -0.5, -1.5);
-          }
-          mesh.setEnabled(true);
-          placed = true;
-          if (placementGuide) placementGuide.classList.remove("active");
-          if (repositionBtn) repositionBtn.style.display = "inline-block";
-          setInfoText("Drag • Pinch to scale • Twist to rotate");
-        };
-        canvas.addEventListener("click", arClickHandler);
-      }
-
-      // AR uses "local" — phones don't support floor tracking for AR sessions
+      // AR uses "local" — phones don't support "local-floor" for AR sessions
       const refSpace = isVR ? "local-floor" : "local";
       await xr.baseExperience.enterXRAsync(selectedSessionMode, refSpace);
     } catch (err) {
-      console.error("XR failed to start:", err);
+      console.error("XR failed:", err);
       alert("XR could not start: " + (err.message || String(err)));
     }
   };
