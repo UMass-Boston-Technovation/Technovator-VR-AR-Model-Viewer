@@ -54,11 +54,8 @@ addClick("btn-choose-ar", () => {
 
 async function createScene(engine, canvas, modelUrl = null) {
   const scene = new BABYLON.Scene(engine);
-  
-  // Make the scene background completely transparent so the device camera can show through
   scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
 
-  scene.createDefaultEnvironment({ createSkybox: false });
   const camera = new BABYLON.ArcRotateCamera("camera",
     Math.PI / 2, Math.PI / 3, 5, BABYLON.Vector3.Zero(), scene
   );
@@ -81,115 +78,155 @@ async function setupXR(scene) {
   document.getElementById("xr-wrapper").removeAttribute("title");
   updateXRButton();
 
-  const xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
-    optionalFeatures: ["local-floor", "bounded-floor", "hit-test", "dom-overlay"],
-    domOverlay: { root: document.body }
-  });
+  let xr = null;
+  let arClickHandler = null;
 
-  let xrSession = null;
-  let modelMesh = null;
-
-  // ===== XR BEHAVIORS =====
-  const pointerDragBehavior = new BABYLON.PointerDragBehavior({ dragPlaneNormal: new BABYLON.Vector3(0, 1, 0) });
-  pointerDragBehavior.useObjectOrientationForDragging = false;
-
-  const scaleBehavior = new BABYLON.MultiPointerScaleBehavior();
-
-  // ===== AR REAL-WORLD HIT TESTING =====
-  let hitTest = null;
-  let latestHit = null;
-  try {
-    // Enable tracking of real-world physical surfaces
-    hitTest = xr.baseExperience.featuresManager.enableFeature(BABYLON.WebXRFeatureName.HIT_TEST, "latest");
-    hitTest.onHitTestResultObservable.add((results) => {
-      if (results.length) {
-        latestHit = results[0];
-      } else {
-        latestHit = null;
-      }
-    });
-  } catch (err) {
-    console.warn("AR Hit-test not supported on this device.");
+  function findModelMesh() {
+    return scene.meshes.find(m =>
+      m.getTotalVertices() > 0 &&
+      m.name !== "__root__" &&
+      m.name !== "" &&
+      !m.name.startsWith("BackgroundHelper") &&
+      !m.name.startsWith("BackgroundPlane") &&
+      !m.name.startsWith("BackgroundSkybox")
+    );
   }
-
-  // ===== XR PLACEMENT (screen / scene pick fallback) =====
-  canvas.addEventListener("click", async (e) => {
-    if (!xrSession || !xr || !xr.baseExperience) return;
-
-    // Only place if a model exists and it's not already placed (parent === null)
-    if (!modelMesh || modelMesh.parent !== null) return;
-
-    try {
-      // 1. Try to place on a real-world physical surface in AR
-      if (selectedSessionMode === "immersive-ar" && latestHit) {
-        if (!modelMesh.rotationQuaternion) {
-          modelMesh.rotationQuaternion = BABYLON.Quaternion.Identity();
-        }
-        const dummyScale = new BABYLON.Vector3();
-        latestHit.transformationMatrix.decompose(dummyScale, modelMesh.rotationQuaternion, modelMesh.position);
-        
-        if (placementGuide) placementGuide.classList.remove("active");
-        if (xrInfo) xrInfo.querySelector("#xr-info-text").textContent = "Model placed on surface! Use gestures to adjust.";
-        return;
-      }
-
-      // 2. Try a normal scene pick at the pointer to get a world point on any hittable virtual mesh
-      const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh !== modelMesh);
-      if (pick && pick.hit && pick.pickedPoint) {
-        modelMesh.position.copyFrom(pick.pickedPoint);
-        if (placementGuide) placementGuide.classList.remove("active");
-        if (xrInfo) xrInfo.querySelector("#xr-info-text").textContent = "Model placed! Use gestures to adjust.";
-        return;
-      }
-
-      // If pick failed, as a fallback place the model in front of the camera at a reasonable distance
-      const forward = scene.activeCamera.getForwardRay().direction;
-      const camPos = scene.activeCamera.position;
-      const fallbackPos = camPos.add(forward.scale(1.5));
-      modelMesh.position = fallbackPos;
-      if (placementGuide) placementGuide.classList.remove("active");
-      if (xrInfo) xrInfo.querySelector("#xr-info-text").textContent = "Model placed!";
-    } catch (err) {
-      console.warn("XR placement failed, using fallback position:", err);
-      modelMesh.position = new BABYLON.Vector3(0, -0.5, -1.5);
-      if (placementGuide) placementGuide.classList.remove("active");
-      if (xrInfo) xrInfo.querySelector("#xr-info-text").textContent = "Model placed!";
-    }
-  });
-
-  // ===== XR SESSION HANDLERS =====
-  xr.baseExperience.onStateChangedObservable.add((state) => {
-    if (state === BABYLON.WebXRState.IN_XR) {
-      if (xrInfo) xrInfo.classList.add("active");
-      if (placementGuide) placementGuide.classList.add("active");
-      xrSession = true;
-    } else {
-      if (xrInfo) xrInfo.classList.remove("active");
-      if (placementGuide) placementGuide.classList.remove("active");
-      xrSession = false;
-      if (modelMesh) modelMesh.dispose();
-      modelMesh = null;
-    }
-  });
-
-  // Store reference to modelMesh in scene for XR mode
-  scene.onBeforeCameraRenderObservable.add(() => {
-    if (xrSession && !modelMesh && scene.meshes.length > 1) {
-      // Auto-detect loaded model
-      modelMesh = scene.meshes.find(m => m !== scene.getMeshByName("default") && m.name !== "");
-      if (modelMesh) {
-        modelMesh.addBehavior(pointerDragBehavior);
-        modelMesh.addBehavior(scaleBehavior);
-      }
-    }
-  });
 
   btnXR.onclick = async () => {
     if (!selectedSessionMode) return;
+
+    // Clean up previous XR experience before creating a new one
+    if (arClickHandler) {
+      canvas.removeEventListener("click", arClickHandler);
+      arClickHandler = null;
+    }
+    if (xr) {
+      try { await xr.baseExperience.exitXRAsync(); } catch {}
+      xr.dispose();
+      xr = null;
+    }
+
+    const isVR = selectedSessionMode === "immersive-vr";
+
     try {
+      // VR needs a visible solid environment; AR needs transparent passthrough
+      if (isVR) {
+        scene.clearColor = new BABYLON.Color4(0.05, 0.05, 0.15, 1.0);
+        if (!scene.getNodeByName("BackgroundHelper")) {
+          scene.createDefaultEnvironment({
+            createGround: true,
+            groundSize: 20,
+            createSkybox: true,
+            skyboxSize: 50,
+          });
+        }
+      }
+
+      xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
+        optionalFeatures: isVR
+          ? ["local-floor", "bounded-floor", "hand-tracking"]
+          : ["local-floor", "bounded-floor", "hit-test", "dom-overlay"],
+        ...(isVR ? {} : { domOverlay: { root: document.body } }),
+      });
+
+      // AR: enable surface hit-testing
+      let latestHit = null;
+      if (!isVR) {
+        try {
+          const hitTest = xr.baseExperience.featuresManager.enableFeature(
+            BABYLON.WebXRFeatureName.HIT_TEST, "latest"
+          );
+          hitTest.onHitTestResultObservable.add(r => {
+            latestHit = r.length ? r[0] : null;
+          });
+        } catch (e) { console.warn("Hit-test unavailable:", e); }
+      }
+
+      // VR: enable controller laser-pointer selection
+      if (isVR) {
+        try {
+          xr.baseExperience.featuresManager.enableFeature(
+            BABYLON.WebXRFeatureName.POINTER_SELECTION, "stable", {
+              xrInput: xr.input,
+              enablePointerSelectionOnAllControllers: true,
+            }
+          );
+        } catch (e) { console.warn("VR pointer selection unavailable:", e); }
+      }
+
+      xr.baseExperience.onStateChangedObservable.add(state => {
+        if (state === BABYLON.WebXRState.IN_XR) {
+          if (xrInfo) xrInfo.classList.add("active");
+
+          const mesh = findModelMesh();
+          if (mesh) {
+            // Clear any previously attached behaviors
+            mesh.behaviors.slice().forEach(b => mesh.removeBehavior(b));
+
+            if (isVR) {
+              // Place model at a comfortable arm's-length distance in VR
+              mesh.position = new BABYLON.Vector3(0, 1.2, -1.5);
+              const bounds = mesh.getHierarchyBoundingVectors();
+              const size = bounds.max.subtract(bounds.min).length();
+              if (size > 0) mesh.scaling.scaleInPlace(1.0 / size);
+              // SixDofDragBehavior: grab & move/rotate with controllers
+              mesh.addBehavior(new BABYLON.SixDofDragBehavior());
+              mesh.addBehavior(new BABYLON.MultiPointerScaleBehavior());
+            } else {
+              if (placementGuide) placementGuide.classList.add("active");
+              const drag = new BABYLON.PointerDragBehavior({
+                dragPlaneNormal: new BABYLON.Vector3(0, 1, 0),
+              });
+              drag.useObjectOrientationForDragging = false;
+              mesh.addBehavior(drag);
+              mesh.addBehavior(new BABYLON.MultiPointerScaleBehavior());
+            }
+          }
+        } else {
+          if (xrInfo) xrInfo.classList.remove("active");
+          if (placementGuide) placementGuide.classList.remove("active");
+          // Restore transparent background when leaving VR
+          if (isVR) scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+        }
+      });
+
+      // AR placement: tap to place model on detected surface
+      if (!isVR) {
+        arClickHandler = () => {
+          if (!xr || xr.baseExperience.state !== BABYLON.WebXRState.IN_XR) return;
+          const mesh = findModelMesh();
+          if (!mesh) return;
+          try {
+            if (latestHit) {
+              if (!mesh.rotationQuaternion)
+                mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+              latestHit.transformationMatrix.decompose(
+                new BABYLON.Vector3(), mesh.rotationQuaternion, mesh.position
+              );
+              if (placementGuide) placementGuide.classList.remove("active");
+              return;
+            }
+            const pick = scene.pick(scene.pointerX, scene.pointerY, m => m !== mesh);
+            if (pick?.hit && pick.pickedPoint) {
+              mesh.position.copyFrom(pick.pickedPoint);
+              if (placementGuide) placementGuide.classList.remove("active");
+              return;
+            }
+            const fwd = scene.activeCamera.getForwardRay().direction;
+            mesh.position = scene.activeCamera.position.add(fwd.scale(1.5));
+            if (placementGuide) placementGuide.classList.remove("active");
+          } catch {
+            mesh.position = new BABYLON.Vector3(0, -0.5, -1.5);
+            if (placementGuide) placementGuide.classList.remove("active");
+          }
+        };
+        canvas.addEventListener("click", arClickHandler);
+      }
+
       await xr.baseExperience.enterXRAsync(selectedSessionMode, "local-floor");
     } catch (err) {
-      alert("XR not supported on this device or browser.");
+      console.error("XR failed to start:", err);
+      alert("XR could not start: " + (err.message || String(err)));
     }
   };
 }
@@ -342,6 +379,7 @@ addClick("logout-btn", async () => {
   if (currentScene) currentScene.dispose();
   currentScene = await createScene(engine, canvas);
   await setupXR(currentScene);
+  engine.stopRenderLoop();
   engine.runRenderLoop(() => currentScene.render());
   await checkUser();
 });
@@ -393,10 +431,10 @@ if (modelSelect) {
   const filename = e.target.value;
   const { data: { user } } = await supabaseClient.auth.getUser();
   const modelUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${user.id}/${filename}`;
-  console.log("Loading model from:", modelUrl); // optional debug line
   if (currentScene) currentScene.dispose();
   currentScene = await createScene(engine, canvas, modelUrl);
   await setupXR(currentScene);
+  engine.stopRenderLoop();
   engine.runRenderLoop(() => currentScene.render());
   };
 }
