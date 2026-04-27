@@ -264,7 +264,6 @@ async function setupXR(scene) {
               const drag = new BABYLON.PointerDragBehavior({ dragPlaneNormal: new BABYLON.Vector3(0, 1, 0) });
               drag.useObjectOrientationForDragging = false;
               mesh.addBehavior(drag);
-
               if (placementGuide) placementGuide.classList.remove("active");
               if (repositionBtn) repositionBtn.style.display = "inline-block";
               setInfoText("Drag • Pinch to scale • Twist to rotate");
@@ -356,7 +355,7 @@ addClick("login-btn", async () => {
     return;
   }
   if (data.user) {
-    alert("✅ Logged in successfully.");
+    alert("Logged in successfully.");
     await checkUser();
   }
 });
@@ -373,7 +372,7 @@ addClick("signup-btn", async () => {
     return;
   }
   if (data.user) {
-    alert("✅ Account created. Check your email for confirmation.");
+    alert("Account created. Check your email for confirmation.");
   }
 });
 
@@ -497,7 +496,7 @@ addClick("upload-model", async () => {
     const path = `${user.id}/${file.name}`;
     const { error } = await supabaseClient.storage.from(BUCKET).upload(path, file, { upsert: true });
     if (error) return alert("Upload failed: " + error.message);
-    alert(`✅ Uploaded ${file.name}`);
+    alert(`Uploaded ${file.name}`);
     await loadModelList(user);
   };
   input.click();
