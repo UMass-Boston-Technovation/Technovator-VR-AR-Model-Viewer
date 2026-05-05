@@ -7,6 +7,7 @@
   <link rel="icon" href="data:," />
   <script src="https://cdn.babylonjs.com/babylon.js" defer></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js" defer></script>
+  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="app.js" defer></script>
   <link rel="stylesheet" href="style.css" />
@@ -49,7 +50,21 @@
 
   <div class="xr-info" id="xr-info">
     <div id="xr-info-text">Tap to place model</div>
-    <button id="ar-reposition-btn" class="btn" style="display:none; margin-top:8px; font-size:13px; padding:6px 14px;">Reposition</button>
+    <div id="ar-controls" style="display:none; margin-top:8px;">
+      <div class="ar-btn-row">
+        <button id="ar-rotate-left" class="ar-btn">&#8634; Rotate</button>
+        <button id="ar-reposition-btn" class="ar-btn">Reposition</button>
+        <button id="ar-rotate-right" class="ar-btn">Rotate &#8635;</button>
+      </div>
+      <div class="ar-btn-row" style="margin-top:5px;">
+        <button id="ar-scale-down" class="ar-btn">Scale &minus;</button>
+        <button id="ar-scale-up" class="ar-btn">Scale +</button>
+      </div>
+    </div>
+    <div id="ar-model-switcher" style="display:none; margin-top:10px;">
+      <div class="ar-switcher-label">Switch Model</div>
+      <div id="ar-model-list" class="ar-model-list"></div>
+    </div>
   </div>
 
   <div class="placement-guide" id="placement-guide"></div>

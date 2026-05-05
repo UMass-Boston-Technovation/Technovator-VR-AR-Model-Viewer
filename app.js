@@ -89,9 +89,12 @@ async function setupXR(scene) {
 
   let xr = null;
   let twistObserver = null;
+  let vrRotateObserver = null;
+  let vrHelpPlane = null;
+  let vrHudPlane = null;
+  let arReticle = null;
 
   function getModelRoot() {
-    // Prefer stored root from import; fall back to first renderable mesh
     if (scene._modelRoot) return scene._modelRoot;
     return scene.meshes.find(m =>
       m.getTotalVertices() > 0 &&
@@ -110,7 +113,6 @@ async function setupXR(scene) {
   }
 
   function rotateMeshY(mesh, delta) {
-    // hit-test decompose sets rotationQuaternion; must use it or rotation is ignored
     if (mesh.rotationQuaternion) {
       mesh.rotationQuaternion = BABYLON.Quaternion.RotationAxis(
         BABYLON.Vector3.Up(), delta
@@ -120,22 +122,46 @@ async function setupXR(scene) {
     }
   }
 
+  function disposeVROverlays() {
+    if (vrRotateObserver) { scene.onBeforeRenderObservable.remove(vrRotateObserver); vrRotateObserver = null; }
+    if (vrHelpPlane && !vrHelpPlane.isDisposed()) { vrHelpPlane.dispose(); vrHelpPlane = null; }
+    if (vrHudPlane && !vrHudPlane.isDisposed()) { vrHudPlane.dispose(); vrHudPlane = null; }
+  }
+
+  function disposeARSession() {
+    if (arReticle && !arReticle.isDisposed()) { arReticle.dispose(); arReticle = null; }
+    const arControlsEl = document.getElementById("ar-controls");
+    const arSwitcherEl = document.getElementById("ar-model-switcher");
+    if (arControlsEl) arControlsEl.style.display = "none";
+    if (arSwitcherEl) arSwitcherEl.style.display = "none";
+    ["ar-rotate-left", "ar-rotate-right", "ar-scale-up", "ar-scale-down", "ar-reposition-btn"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.onclick = null;
+    });
+  }
+
   btnXR.onclick = async () => {
     if (!selectedSessionMode) return;
 
     if (twistObserver) { scene.onPointerObservable.remove(twistObserver); twistObserver = null; }
+    disposeVROverlays();
+    disposeARSession();
     if (xr) {
       try { await xr.baseExperience.exitXRAsync(); } catch {}
       xr.dispose(); xr = null;
     }
 
     const isVR = selectedSessionMode === "immersive-vr";
+    let vrGroundMesh = null;
 
     try {
       if (isVR) {
         scene.clearColor = new BABYLON.Color4(0.05, 0.05, 0.15, 1.0);
         if (!scene.getNodeByName("BackgroundHelper")) {
-          scene.createDefaultEnvironment({ createGround: true, groundSize: 20, createSkybox: true, skyboxSize: 50 });
+          const env = scene.createDefaultEnvironment({ createGround: true, groundSize: 20, createSkybox: true, skyboxSize: 50 });
+          vrGroundMesh = env && env.ground ? env.ground : null;
+        } else {
+          vrGroundMesh = scene.getMeshByName("BackgroundPlane") || null;
         }
       }
 
@@ -147,13 +173,24 @@ async function setupXR(scene) {
       });
 
       let latestHit = null;
+      let hasHitTest = false;
       if (!isVR) {
         try {
           const hitTest = xr.baseExperience.featuresManager.enableFeature(
             BABYLON.WebXRFeatureName.HIT_TEST, "latest"
           );
+          hasHitTest = true;
           hitTest.onHitTestResultObservable.add(r => { latestHit = r.length ? r[0] : null; });
         } catch (e) { console.warn("Hit-test unavailable:", e); }
+
+        try {
+          xr.baseExperience.featuresManager.enableFeature(
+            BABYLON.WebXRFeatureName.LIGHT_ESTIMATION, "latest", {
+              createDirectionalLightSource: true,
+              setSceneEnvironmentTexture: false,
+            }
+          );
+        } catch (e) { console.warn("Light estimation unavailable:", e); }
       }
 
       if (isVR) {
@@ -163,9 +200,25 @@ async function setupXR(scene) {
             { xrInput: xr.input, enablePointerSelectionOnAllControllers: true }
           );
         } catch (e) { console.warn("VR pointer selection unavailable:", e); }
+
+        try {
+          xr.baseExperience.featuresManager.enableFeature(
+            BABYLON.WebXRFeatureName.TELEPORTATION, "stable", {
+              xrInput: xr.input,
+              floorMeshes: vrGroundMesh ? [vrGroundMesh] : [],
+            }
+          );
+        } catch (e) { console.warn("Teleportation unavailable:", e); }
+
+        try {
+          xr.baseExperience.featuresManager.enableFeature(
+            BABYLON.WebXRFeatureName.HAND_TRACKING, "latest", {
+              xrInput: xr.input,
+            }
+          );
+        } catch (e) { console.warn("Hand tracking unavailable:", e); }
       }
 
-      // Shared across state-change callbacks for AR lifecycle management
       let followObserver = null;
       let placeTapObserver = null;
 
@@ -190,14 +243,192 @@ async function setupXR(scene) {
             mesh.addBehavior(new BABYLON.SixDofDragBehavior());
             mesh.addBehavior(new BABYLON.MultiPointerScaleBehavior());
 
+            // Right thumbstick X axis → rotate model around Y
+            vrRotateObserver = scene.onBeforeRenderObservable.add(() => {
+              xr.input.controllers.forEach(ctrl => {
+                if (ctrl.inputSource.handedness !== "right") return;
+                const mc = ctrl.motionController;
+                if (!mc) return;
+                const stick = mc.getComponentOfType("thumbstick") || mc.getComponentOfType("touchpad");
+                if (stick && Math.abs(stick.axes.x) > 0.15) {
+                  rotateMeshY(mesh, stick.axes.x * 0.025);
+                }
+              });
+            });
+
+            if (BABYLON.GUI) {
+              // -- Controller hint overlay (auto-dismisses after 7 s) --
+              vrHelpPlane = BABYLON.MeshBuilder.CreatePlane("vrHelpHint", { width: 0.55, height: 0.28 }, scene);
+              vrHelpPlane.position = new BABYLON.Vector3(0, 1.9, -1.2);
+              vrHelpPlane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+              const helpTex = BABYLON.GUI.AdvancedDynamicTexture.CreateForMesh(vrHelpPlane, 550, 280);
+
+              const helpBg = new BABYLON.GUI.Rectangle();
+              helpBg.width = 1; helpBg.height = 1;
+              helpBg.background = "#111827e0";
+              helpBg.cornerRadius = 14;
+              helpBg.thickness = 1.5;
+              helpBg.color = "#3b82f6";
+              helpTex.addControl(helpBg);
+
+              const helpStack = new BABYLON.GUI.StackPanel();
+              helpStack.paddingTop = "14px";
+              helpStack.paddingLeft = "18px";
+              helpStack.paddingRight = "18px";
+              helpBg.addControl(helpStack);
+
+              const addHintLine = (text, color = "#f1f5f9", size = 23) => {
+                const t = new BABYLON.GUI.TextBlock();
+                t.text = text;
+                t.color = color;
+                t.fontSize = size;
+                t.height = `${size + 14}px`;
+                t.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+                helpStack.addControl(t);
+              };
+
+              addHintLine("Controller Guide", "#93c5fd", 26);
+              addHintLine("Trigger: Grab / Release");
+              addHintLine("Right Stick ↔: Rotate Model");
+              addHintLine("Left Stick: Teleport");
+              addHintLine("Both Grips: Scale (pinch)");
+
+              setTimeout(() => {
+                if (vrHelpPlane && !vrHelpPlane.isDisposed()) { vrHelpPlane.dispose(); vrHelpPlane = null; }
+              }, 7000);
+
+              // -- Persistent HUD menu (to left of model, ray-selectable) --
+              vrHudPlane = BABYLON.MeshBuilder.CreatePlane("vrHUD", { width: 0.4, height: 0.36 }, scene);
+              vrHudPlane.position = new BABYLON.Vector3(-0.85, 1.45, -1.5);
+              vrHudPlane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+              const hudTex = BABYLON.GUI.AdvancedDynamicTexture.CreateForMesh(vrHudPlane, 400, 360);
+
+              const hudBg = new BABYLON.GUI.Rectangle();
+              hudBg.width = 1; hudBg.height = 1;
+              hudBg.background = "#0f172ae6";
+              hudBg.cornerRadius = 14;
+              hudBg.thickness = 1.5;
+              hudBg.color = "#6366f1";
+              hudTex.addControl(hudBg);
+
+              const hudStack = new BABYLON.GUI.StackPanel();
+              hudStack.paddingTop = "12px";
+              hudStack.paddingLeft = "12px";
+              hudStack.paddingRight = "12px";
+              hudBg.addControl(hudStack);
+
+              const hudTitle = new BABYLON.GUI.TextBlock();
+              hudTitle.text = "VR Menu";
+              hudTitle.color = "#a5b4fc";
+              hudTitle.fontSize = 26;
+              hudTitle.height = "42px";
+              hudStack.addControl(hudTitle);
+
+              const makeHudBtn = (label, onClick) => {
+                const btn = BABYLON.GUI.Button.CreateSimpleButton(`hud_${label}`, label);
+                btn.width = "260px";
+                btn.height = "48px";
+                btn.color = "white";
+                btn.fontSize = 20;
+                btn.background = "#1e3a5f";
+                btn.cornerRadius = 8;
+                btn.paddingBottom = "8px";
+                btn.onPointerEnterObservable.add(() => { btn.background = "#2d5a8e"; });
+                btn.onPointerOutObservable.add(() => { btn.background = "#1e3a5f"; });
+                btn.onPointerClickObservable.add(onClick);
+                hudStack.addControl(btn);
+                return btn;
+              };
+
+              makeHudBtn("Reset Position", () => {
+                mesh.position = new BABYLON.Vector3(0, 1.2, -1.5);
+                if (mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+                else mesh.rotation = BABYLON.Vector3.Zero();
+                normalizeModelSize(mesh, 1.0);
+              });
+              makeHudBtn("Scale +", () => mesh.scaling.scaleInPlace(1.25));
+              makeHudBtn("Scale -", () => mesh.scaling.scaleInPlace(0.8));
+              makeHudBtn("Exit XR", async () => {
+                try { await xr.baseExperience.exitXRAsync(); } catch(e) {}
+              });
+            }
+
           } else {
             // ── AR MODE ──
             normalizeModelSize(mesh, 0.3);
             let placed = false;
             let activePointerCount = 0;
+            let activeMesh = mesh;
 
-            // Attach pinch-to-scale — works before and after placement
-            mesh.addBehavior(new BABYLON.MultiPointerScaleBehavior());
+            // Placement reticle — cyan ring that previews the detected surface
+            arReticle = BABYLON.MeshBuilder.CreateTorus("arReticle",
+              { diameter: 0.28, thickness: 0.018, tessellation: 32 }, scene);
+            arReticle.isPickable = false;
+            arReticle.setEnabled(false);
+            const reticleMat = new BABYLON.StandardMaterial("reticleMat", scene);
+            reticleMat.emissiveColor = new BABYLON.Color3(0, 1, 0.9);
+            reticleMat.disableLighting = true;
+            arReticle.material = reticleMat;
+
+            const arControlsEl = document.getElementById("ar-controls");
+            const arSwitcherEl = document.getElementById("ar-model-switcher");
+            const arModelListEl = document.getElementById("ar-model-list");
+
+            // Populate in-XR model switcher from the DOM select options
+            if (arModelListEl) {
+              arModelListEl.innerHTML = "";
+              const selectEl = document.getElementById("model-select");
+              const opts = Array.from(selectEl.options).filter(o => o.value);
+              if (opts.length > 1 && arSwitcherEl) {
+                arSwitcherEl.style.display = "block";
+                opts.forEach(opt => {
+                  const chip = document.createElement("button");
+                  chip.className = "ar-model-chip" + (opt.value === selectEl.value ? " active" : "");
+                  chip.textContent = opt.textContent;
+                  chip.onclick = async () => {
+                    chip.disabled = true;
+                    const origText = chip.textContent;
+                    chip.textContent = "Loading…";
+                    try {
+                      const { data: { user } } = await supabaseClient.auth.getUser();
+                      if (!user) return;
+                      const modelUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${user.id}/${opt.value}`;
+                      const savedPos = activeMesh ? activeMesh.position.clone() : null;
+                      const savedRot = activeMesh && activeMesh.rotationQuaternion ? activeMesh.rotationQuaternion.clone() : null;
+                      scene.meshes
+                        .filter(m => m !== arReticle && m.getTotalVertices() > 0 && !m.name.startsWith("Background"))
+                        .forEach(m => m.dispose());
+                      scene._modelRoot = null;
+                      activeMesh = null;
+                      const result = await BABYLON.SceneLoader.ImportMeshAsync("", modelUrl, "", scene);
+                      if (result.meshes.length > 0) {
+                        result.meshes.forEach(m => { m.isPickable = true; });
+                        const first = result.meshes[0];
+                        const newRoot = (first.parent instanceof BABYLON.AbstractMesh) ? first.parent : first;
+                        scene._modelRoot = newRoot;
+                        normalizeModelSize(newRoot, 0.3);
+                        newRoot.addBehavior(new BABYLON.MultiPointerScaleBehavior());
+                        if (placed && savedPos) {
+                          newRoot.position.copyFrom(savedPos);
+                          if (savedRot) newRoot.rotationQuaternion = savedRot;
+                          const drag = new BABYLON.PointerDragBehavior({ dragPlaneNormal: new BABYLON.Vector3(0, 1, 0) });
+                          drag.useObjectOrientationForDragging = false;
+                          newRoot.addBehavior(drag);
+                        }
+                        activeMesh = newRoot;
+                      }
+                      arModelListEl.querySelectorAll(".ar-model-chip").forEach(c => c.classList.remove("active"));
+                      chip.classList.add("active");
+                    } catch(e) { console.error("AR model switch failed:", e); }
+                    chip.disabled = false;
+                    chip.textContent = origText;
+                  };
+                  arModelListEl.appendChild(chip);
+                });
+              }
+            }
+
+            activeMesh.addBehavior(new BABYLON.MultiPointerScaleBehavior());
 
             // Two-finger twist: rotate around Y (only when placed)
             const twistPointers = new Map();
@@ -212,77 +443,97 @@ async function setupXR(scene) {
                 twistPointers.delete(pid);
                 lastTwistAngle = null;
               } else if (type === BABYLON.PointerEventTypes.POINTERMOVE && twistPointers.size >= 2 && placed) {
+                if (!activeMesh) return;
                 twistPointers.set(pid, { x: event.clientX, y: event.clientY });
                 const [p1, p2] = [...twistPointers.values()];
                 const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-                if (lastTwistAngle !== null) rotateMeshY(mesh, angle - lastTwistAngle);
+                if (lastTwistAngle !== null) rotateMeshY(activeMesh, angle - lastTwistAngle);
                 lastTwistAngle = angle;
               }
             });
 
+            function setPlacementPhase(phase) {
+              if (phase === "scanning")  setInfoText(hasHitTest ? "Move camera to scan a flat surface" : "Tap to place in front of camera");
+              else if (phase === "ready") setInfoText("Surface found — tap to place");
+              else if (phase === "placed") setInfoText("Drag • Pinch to scale • Rotate buttons");
+            }
+
             function enterPlacementMode() {
               placed = false;
               activePointerCount = 0;
-              mesh.behaviors
-                .filter(b => b instanceof BABYLON.PointerDragBehavior)
-                .forEach(b => mesh.removeBehavior(b));
+              if (activeMesh) activeMesh.behaviors.filter(b => b instanceof BABYLON.PointerDragBehavior).forEach(b => activeMesh.removeBehavior(b));
               if (placementGuide) placementGuide.classList.add("active");
-              if (repositionBtn) repositionBtn.style.display = "none";
-              setInfoText("Point at a flat surface and tap to place");
+              if (arControlsEl) arControlsEl.style.display = "none";
+              arReticle.setEnabled(false);
+              setPlacementPhase("scanning");
 
-              // Model floats on the detected surface in real-time while scanning
               if (!followObserver) {
                 followObserver = scene.onBeforeRenderObservable.add(() => {
-                  if (placed || !latestHit) return;
-                  if (!mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
-                  latestHit.transformationMatrix.decompose(
-                    new BABYLON.Vector3(), mesh.rotationQuaternion, mesh.position
-                  );
+                  if (placed || !activeMesh) return;
+                  if (latestHit) {
+                    const tmpQ = new BABYLON.Quaternion();
+                    const tmpP = new BABYLON.Vector3();
+                    latestHit.transformationMatrix.decompose(new BABYLON.Vector3(), tmpQ, tmpP);
+                    activeMesh.position.copyFrom(tmpP);
+                    if (!activeMesh.rotationQuaternion) activeMesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+                    activeMesh.rotationQuaternion.copyFrom(tmpQ);
+                    arReticle.position.copyFrom(tmpP);
+                    arReticle.setEnabled(true);
+                    setPlacementPhase("ready");
+                  } else {
+                    arReticle.setEnabled(false);
+                    setPlacementPhase("scanning");
+                  }
                 });
               }
             }
 
             function enterInteractionMode() {
-              // Snap to current surface position at moment of tap
+              if (!activeMesh) return;
               if (latestHit) {
-                if (!mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
-                latestHit.transformationMatrix.decompose(
-                  new BABYLON.Vector3(), mesh.rotationQuaternion, mesh.position
-                );
-              } else if (mesh.position.lengthSquared() < 0.001) {
-                // No surface detected — place 1.5 m in front of camera
+                if (!activeMesh.rotationQuaternion) activeMesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+                latestHit.transformationMatrix.decompose(new BABYLON.Vector3(), activeMesh.rotationQuaternion, activeMesh.position);
+              } else if (activeMesh.position.lengthSquared() < 0.001) {
                 const fwd = scene.activeCamera.getForwardRay().direction;
-                mesh.position = scene.activeCamera.position.add(fwd.scale(1.5));
+                activeMesh.position = scene.activeCamera.position.add(fwd.scale(1.5));
               }
 
               placed = true;
-              if (followObserver) {
-                scene.onBeforeRenderObservable.remove(followObserver);
-                followObserver = null;
-              }
+              if (followObserver) { scene.onBeforeRenderObservable.remove(followObserver); followObserver = null; }
+              arReticle.setEnabled(false);
 
+              activeMesh.behaviors.filter(b => b instanceof BABYLON.PointerDragBehavior).forEach(b => activeMesh.removeBehavior(b));
               const drag = new BABYLON.PointerDragBehavior({ dragPlaneNormal: new BABYLON.Vector3(0, 1, 0) });
               drag.useObjectOrientationForDragging = false;
-              mesh.addBehavior(drag);
+              activeMesh.addBehavior(drag);
+
               if (placementGuide) placementGuide.classList.remove("active");
-              if (repositionBtn) repositionBtn.style.display = "inline-block";
-              setInfoText("Drag • Pinch to scale • Twist to rotate");
+              if (arControlsEl) arControlsEl.style.display = "block";
+              setPlacementPhase("placed");
             }
 
-            // Tap detection via scene observable — canvas.click does NOT fire in WebXR
+            // Tap detection — canvas.click does NOT fire in WebXR
             placeTapObserver = scene.onPointerObservable.add(evt => {
               if (evt.type === BABYLON.PointerEventTypes.POINTERDOWN) {
                 activePointerCount++;
               } else if (evt.type === BABYLON.PointerEventTypes.POINTERUP) {
                 activePointerCount = Math.max(0, activePointerCount - 1);
-                // Single finger released with no remaining fingers = tap → lock placement
                 if (!placed && activePointerCount === 0) enterInteractionMode();
               }
             });
 
-            if (repositionBtn) {
-              repositionBtn.onclick = () => { if (placed) enterPlacementMode(); };
-            }
+            // Dedicated rotate/scale/reposition buttons (DOM overlay)
+            const rotateDelta = Math.PI / 12;
+            const elRL = document.getElementById("ar-rotate-left");
+            const elRR = document.getElementById("ar-rotate-right");
+            const elSU = document.getElementById("ar-scale-up");
+            const elSD = document.getElementById("ar-scale-down");
+            const elRP = document.getElementById("ar-reposition-btn");
+            if (elRL) elRL.onclick = () => { if (activeMesh) rotateMeshY(activeMesh, -rotateDelta); };
+            if (elRR) elRR.onclick = () => { if (activeMesh) rotateMeshY(activeMesh, rotateDelta); };
+            if (elSU) elSU.onclick = () => { if (activeMesh) activeMesh.scaling.scaleInPlace(1.25); };
+            if (elSD) elSD.onclick = () => { if (activeMesh) activeMesh.scaling.scaleInPlace(0.8); };
+            if (elRP) elRP.onclick = () => { if (placed) enterPlacementMode(); };
 
             enterPlacementMode();
           }
@@ -292,9 +543,9 @@ async function setupXR(scene) {
           if (followObserver) { scene.onBeforeRenderObservable.remove(followObserver); followObserver = null; }
           if (placeTapObserver) { scene.onPointerObservable.remove(placeTapObserver); placeTapObserver = null; }
           if (twistObserver) { scene.onPointerObservable.remove(twistObserver); twistObserver = null; }
+          if (isVR) disposeVROverlays(); else disposeARSession();
           if (xrInfo) xrInfo.classList.remove("active");
           if (placementGuide) placementGuide.classList.remove("active");
-          if (repositionBtn) repositionBtn.style.display = "none";
           if (isVR) scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
         }
       });
