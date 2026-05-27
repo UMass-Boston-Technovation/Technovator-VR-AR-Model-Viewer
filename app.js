@@ -132,8 +132,12 @@ async function setupXR(scene) {
     if (arReticle && !arReticle.isDisposed()) { arReticle.dispose(); arReticle = null; }
     const arControlsEl = document.getElementById("ar-controls");
     const arSwitcherEl = document.getElementById("ar-model-switcher");
+    const arInstrEl = document.getElementById("ar-instructions");
+    const arExitEl = document.getElementById("ar-exit-btn");
     if (arControlsEl) arControlsEl.style.display = "none";
     if (arSwitcherEl) arSwitcherEl.style.display = "none";
+    if (arInstrEl) arInstrEl.style.display = "none";
+    if (arExitEl) { arExitEl.style.display = "none"; arExitEl.onclick = null; }
     ["ar-rotate-left", "ar-rotate-right", "ar-scale-up", "ar-scale-down", "ar-reposition-btn"].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.onclick = null;
@@ -257,104 +261,79 @@ async function setupXR(scene) {
             });
 
             if (BABYLON.GUI) {
-              // -- Controller hint overlay (auto-dismisses after 7 s) --
-              vrHelpPlane = BABYLON.MeshBuilder.CreatePlane("vrHelpHint", { width: 0.55, height: 0.28 }, scene);
-              vrHelpPlane.position = new BABYLON.Vector3(0, 1.9, -1.2);
+              // -- Persistent VR info + control panel (instructions + buttons) --
+              vrHelpPlane = BABYLON.MeshBuilder.CreatePlane("vrInfoPanel", { width: 0.5, height: 0.58 }, scene);
+              vrHelpPlane.position = new BABYLON.Vector3(-0.78, 1.58, -1.5);
               vrHelpPlane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-              const helpTex = BABYLON.GUI.AdvancedDynamicTexture.CreateForMesh(vrHelpPlane, 550, 280);
+              const panelTex = BABYLON.GUI.AdvancedDynamicTexture.CreateForMesh(vrHelpPlane, 500, 580);
 
-              const helpBg = new BABYLON.GUI.Rectangle();
-              helpBg.width = 1; helpBg.height = 1;
-              helpBg.background = "#111827e0";
-              helpBg.cornerRadius = 14;
-              helpBg.thickness = 1.5;
-              helpBg.color = "#3b82f6";
-              helpTex.addControl(helpBg);
+              const panelBg = new BABYLON.GUI.Rectangle();
+              panelBg.width = 1; panelBg.height = 1;
+              panelBg.background = "#0f172aee";
+              panelBg.cornerRadius = 14;
+              panelBg.thickness = 1.5;
+              panelBg.color = "#6366f1";
+              panelTex.addControl(panelBg);
 
-              const helpStack = new BABYLON.GUI.StackPanel();
-              helpStack.paddingTop = "14px";
-              helpStack.paddingLeft = "18px";
-              helpStack.paddingRight = "18px";
-              helpBg.addControl(helpStack);
+              const panelStack = new BABYLON.GUI.StackPanel();
+              panelStack.paddingTop = "16px";
+              panelStack.paddingLeft = "16px";
+              panelStack.paddingRight = "16px";
+              panelBg.addControl(panelStack);
 
-              const addHintLine = (text, color = "#f1f5f9", size = 23) => {
+              const addLine = (text, color = "#cbd5e1", size = 20) => {
                 const t = new BABYLON.GUI.TextBlock();
-                t.text = text;
-                t.color = color;
-                t.fontSize = size;
-                t.height = `${size + 14}px`;
+                t.text = text; t.color = color; t.fontSize = size;
+                t.height = `${size + 12}px`;
                 t.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-                helpStack.addControl(t);
+                panelStack.addControl(t);
               };
 
-              addHintLine("Controller Guide", "#93c5fd", 26);
-              addHintLine("Trigger: Grab / Release");
-              addHintLine("Right Stick ↔: Rotate Model");
-              addHintLine("Left Stick: Teleport");
-              addHintLine("Both Grips: Scale (pinch)");
+              addLine("VR Controls", "#a5b4fc", 25);
+              addLine("Move: Grip & drag", "#cbd5e1", 19);
+              addLine("Rotate: Right stick", "#cbd5e1", 19);
+              addLine("Scale: Both grips", "#cbd5e1", 19);
+              addLine("Teleport: Left stick", "#cbd5e1", 19);
 
-              setTimeout(() => {
-                if (vrHelpPlane && !vrHelpPlane.isDisposed()) { vrHelpPlane.dispose(); vrHelpPlane = null; }
-              }, 7000);
+              const gap = new BABYLON.GUI.Rectangle();
+              gap.height = "10px"; gap.thickness = 0;
+              panelStack.addControl(gap);
 
-              // -- Persistent HUD menu (to left of model, ray-selectable) --
-              vrHudPlane = BABYLON.MeshBuilder.CreatePlane("vrHUD", { width: 0.4, height: 0.36 }, scene);
-              vrHudPlane.position = new BABYLON.Vector3(-0.85, 1.45, -1.5);
-              vrHudPlane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-              const hudTex = BABYLON.GUI.AdvancedDynamicTexture.CreateForMesh(vrHudPlane, 400, 360);
-
-              const hudBg = new BABYLON.GUI.Rectangle();
-              hudBg.width = 1; hudBg.height = 1;
-              hudBg.background = "#0f172ae6";
-              hudBg.cornerRadius = 14;
-              hudBg.thickness = 1.5;
-              hudBg.color = "#6366f1";
-              hudTex.addControl(hudBg);
-
-              const hudStack = new BABYLON.GUI.StackPanel();
-              hudStack.paddingTop = "12px";
-              hudStack.paddingLeft = "12px";
-              hudStack.paddingRight = "12px";
-              hudBg.addControl(hudStack);
-
-              const hudTitle = new BABYLON.GUI.TextBlock();
-              hudTitle.text = "VR Menu";
-              hudTitle.color = "#a5b4fc";
-              hudTitle.fontSize = 26;
-              hudTitle.height = "42px";
-              hudStack.addControl(hudTitle);
-
-              const makeHudBtn = (label, onClick) => {
-                const btn = BABYLON.GUI.Button.CreateSimpleButton(`hud_${label}`, label);
-                btn.width = "260px";
-                btn.height = "48px";
-                btn.color = "white";
-                btn.fontSize = 20;
-                btn.background = "#1e3a5f";
-                btn.cornerRadius = 8;
-                btn.paddingBottom = "8px";
-                btn.onPointerEnterObservable.add(() => { btn.background = "#2d5a8e"; });
-                btn.onPointerOutObservable.add(() => { btn.background = "#1e3a5f"; });
+              const makeBtn = (label, bg, hoverBg, textColor, onClick) => {
+                const btn = BABYLON.GUI.Button.CreateSimpleButton(`vrBtn_${label}`, label);
+                btn.width = "320px"; btn.height = "46px";
+                btn.color = textColor; btn.fontSize = 19;
+                btn.background = bg; btn.cornerRadius = 8; btn.paddingBottom = "7px";
+                btn.onPointerEnterObservable.add(() => { btn.background = hoverBg; });
+                btn.onPointerOutObservable.add(() => { btn.background = bg; });
                 btn.onPointerClickObservable.add(onClick);
-                hudStack.addControl(btn);
+                panelStack.addControl(btn);
                 return btn;
               };
 
-              makeHudBtn("Reset Position", () => {
+              makeBtn("Reset Position", "#1e3a5f", "#2d5a8e", "white", () => {
                 mesh.position = new BABYLON.Vector3(0, 1.2, -1.5);
                 if (mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
                 else mesh.rotation = BABYLON.Vector3.Zero();
                 normalizeModelSize(mesh, 1.0);
               });
-              makeHudBtn("Scale +", () => mesh.scaling.scaleInPlace(1.25));
-              makeHudBtn("Scale -", () => mesh.scaling.scaleInPlace(0.8));
-              makeHudBtn("Exit XR", async () => {
+              makeBtn("Scale +", "#1e3a5f", "#2d5a8e", "white", () => mesh.scaling.scaleInPlace(1.25));
+              makeBtn("Scale -", "#1e3a5f", "#2d5a8e", "white", () => mesh.scaling.scaleInPlace(0.8));
+              makeBtn("Exit VR", "#4c1d1d", "#7f1d1d", "#fca5a5", async () => {
                 try { await xr.baseExperience.exitXRAsync(); } catch(e) {}
               });
             }
 
           } else {
             // ── AR MODE ──
+            const arExitEl = document.getElementById("ar-exit-btn");
+            if (arExitEl) {
+              arExitEl.style.display = "block";
+              arExitEl.onclick = async () => {
+                try { await xr.baseExperience.exitXRAsync(); } catch(e) {}
+              };
+            }
+
             normalizeModelSize(mesh, 0.3);
             let placed = false;
             let activePointerCount = 0;
@@ -464,6 +443,8 @@ async function setupXR(scene) {
               if (activeMesh) activeMesh.behaviors.filter(b => b instanceof BABYLON.PointerDragBehavior).forEach(b => activeMesh.removeBehavior(b));
               if (placementGuide) placementGuide.classList.add("active");
               if (arControlsEl) arControlsEl.style.display = "none";
+              const arInstrEl2 = document.getElementById("ar-instructions");
+              if (arInstrEl2) arInstrEl2.style.display = "none";
               arReticle.setEnabled(false);
               setPlacementPhase("scanning");
 
@@ -509,6 +490,8 @@ async function setupXR(scene) {
 
               if (placementGuide) placementGuide.classList.remove("active");
               if (arControlsEl) arControlsEl.style.display = "block";
+              const arInstrEl2 = document.getElementById("ar-instructions");
+              if (arInstrEl2) arInstrEl2.style.display = "block";
               setPlacementPhase("placed");
             }
 
