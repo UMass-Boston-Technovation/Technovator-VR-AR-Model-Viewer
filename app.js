@@ -243,7 +243,18 @@ async function setupXR(scene) {
           if (isVR) {
             // ── VR MODE ──
             normalizeModelSize(mesh, 1.0);
-            mesh.position = new BABYLON.Vector3(0, 1.2, -1.5);
+
+            function vrSpawnPositions() {
+              const camPos = scene.activeCamera.position;
+              const forward = scene.activeCamera.getForwardRay().direction;
+              return {
+                mesh: camPos.add(forward.scale(1.2)).add(new BABYLON.Vector3(0, 0.1, 0)),
+                panel: camPos.add(forward.scale(1.0)).add(new BABYLON.Vector3(-0.6, 0.5, 0)),
+              };
+            }
+
+            const spawnPos = vrSpawnPositions();
+            mesh.position = spawnPos.mesh;
             mesh.addBehavior(new BABYLON.SixDofDragBehavior());
             mesh.addBehavior(new BABYLON.MultiPointerScaleBehavior());
 
@@ -263,7 +274,7 @@ async function setupXR(scene) {
             if (BABYLON.GUI) {
               // -- Persistent VR info + control panel (instructions + buttons) --
               vrHelpPlane = BABYLON.MeshBuilder.CreatePlane("vrInfoPanel", { width: 0.5, height: 0.58 }, scene);
-              vrHelpPlane.position = new BABYLON.Vector3(-0.78, 1.58, -1.5);
+              vrHelpPlane.position = vrSpawnPositions().panel;
               vrHelpPlane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
               const panelTex = BABYLON.GUI.AdvancedDynamicTexture.CreateForMesh(vrHelpPlane, 500, 580);
 
@@ -312,7 +323,9 @@ async function setupXR(scene) {
               };
 
               makeBtn("Reset Position", "#1e3a5f", "#2d5a8e", "white", () => {
-                mesh.position = new BABYLON.Vector3(0, 1.2, -1.5);
+                const pos = vrSpawnPositions();
+                mesh.position = pos.mesh;
+                vrHelpPlane.position = pos.panel;
                 if (mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
                 else mesh.rotation = BABYLON.Vector3.Zero();
                 normalizeModelSize(mesh, 1.0);
