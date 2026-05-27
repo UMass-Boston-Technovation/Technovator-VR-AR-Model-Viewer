@@ -56,6 +56,7 @@ async function createScene(engine, canvas, modelUrl = null) {
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
   scene._modelRoot = null;
+  scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
 
   const camera = new BABYLON.ArcRotateCamera("camera",
     Math.PI / 2, Math.PI / 3, 5, BABYLON.Vector3.Zero(), scene
@@ -166,6 +167,12 @@ async function setupXR(scene) {
           vrGroundMesh = env && env.ground ? env.ground : null;
         } else {
           vrGroundMesh = scene.getMeshByName("BackgroundPlane") || null;
+        }
+        if (vrGroundMesh && !vrGroundMesh.physicsImpostor) {
+          vrGroundMesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+            vrGroundMesh, BABYLON.PhysicsImpostor.BoxImpostor,
+            { mass: 0, restitution: 0.3, friction: 1 }, scene
+          );
         }
       }
 
@@ -332,6 +339,27 @@ async function setupXR(scene) {
               });
               makeBtn("Scale +", "#1e3a5f", "#2d5a8e", "white", () => mesh.scaling.scaleInPlace(1.25));
               makeBtn("Scale -", "#1e3a5f", "#2d5a8e", "white", () => mesh.scaling.scaleInPlace(0.8));
+
+              let physicsEnabled = false;
+              const physBtn = makeBtn("Enable Physics", "#163316", "#1f4d1f", "#86efac", () => {
+                if (!physicsEnabled) {
+                  mesh.behaviors.filter(b => b instanceof BABYLON.SixDofDragBehavior)
+                    .forEach(b => mesh.removeBehavior(b));
+                  mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                    mesh, BABYLON.PhysicsImpostor.BoxImpostor,
+                    { mass: 1, restitution: 0.6, friction: 0.4 }, scene
+                  );
+                  physicsEnabled = true;
+                  if (physBtn.children[0]) physBtn.children[0].text = "Disable Physics";
+                } else {
+                  if (mesh.physicsImpostor) { mesh.physicsImpostor.dispose(); mesh.physicsImpostor = null; }
+                  mesh.addBehavior(new BABYLON.SixDofDragBehavior());
+                  mesh.position = vrSpawnPositions().mesh;
+                  physicsEnabled = false;
+                  if (physBtn.children[0]) physBtn.children[0].text = "Enable Physics";
+                }
+              });
+
               makeBtn("Exit VR", "#4c1d1d", "#7f1d1d", "#fca5a5", async () => {
                 try { await xr.baseExperience.exitXRAsync(); } catch(e) {}
               });
