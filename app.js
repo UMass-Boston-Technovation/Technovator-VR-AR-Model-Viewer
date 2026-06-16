@@ -94,6 +94,7 @@ async function setupXR(scene) {
   let vrHelpPlane = null;
   let vrHudPlane = null;
   let arReticle = null;
+  let instrAutoHideTimer = null;
 
   function getModelRoot() {
     if (scene._modelRoot) return scene._modelRoot;
@@ -130,16 +131,19 @@ async function setupXR(scene) {
   }
 
   function disposeARSession() {
+    if (instrAutoHideTimer) { clearTimeout(instrAutoHideTimer); instrAutoHideTimer = null; }
     if (arReticle && !arReticle.isDisposed()) { arReticle.dispose(); arReticle = null; }
     const arControlsEl = document.getElementById("ar-controls");
     const arSwitcherEl = document.getElementById("ar-model-switcher");
     const arInstrEl = document.getElementById("ar-instructions");
     const arExitEl = document.getElementById("ar-exit-btn");
+    const arInfoBtnEl = document.getElementById("ar-info-btn");
     if (arControlsEl) arControlsEl.style.display = "none";
     if (arSwitcherEl) arSwitcherEl.style.display = "none";
     if (arInstrEl) arInstrEl.style.display = "none";
+    if (arInfoBtnEl) arInfoBtnEl.style.display = "none";
     if (arExitEl) { arExitEl.style.display = "none"; arExitEl.onclick = null; }
-    ["ar-rotate-left", "ar-rotate-right", "ar-scale-up", "ar-scale-down", "ar-reposition-btn"].forEach(id => {
+    ["ar-rotate-left", "ar-rotate-right", "ar-scale-up", "ar-scale-down", "ar-reposition-btn", "ar-reset-btn", "ar-instr-close", "ar-info-btn"].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.onclick = null;
     });
@@ -427,7 +431,6 @@ async function setupXR(scene) {
                         const newRoot = (first.parent instanceof BABYLON.AbstractMesh) ? first.parent : first;
                         scene._modelRoot = newRoot;
                         normalizeModelSize(newRoot, 0.3);
-                        newRoot.addBehavior(new BABYLON.MultiPointerScaleBehavior());
                         if (placed && savedPos) {
                           newRoot.position.copyFrom(savedPos);
                           if (savedRot) newRoot.rotationQuaternion = savedRot;
@@ -448,25 +451,32 @@ async function setupXR(scene) {
               }
             }
 
-            activeMesh.addBehavior(new BABYLON.MultiPointerScaleBehavior());
-
-            // Two-finger twist: rotate around Y (only when placed)
+            // Two-finger pinch to scale + twist to rotate (when placed)
             const twistPointers = new Map();
             let lastTwistAngle = null;
+            let lastPinchDist = null;
             twistObserver = scene.onPointerObservable.add(evt => {
               const { type, event } = evt;
               const pid = event.pointerId;
               if (type === BABYLON.PointerEventTypes.POINTERDOWN) {
                 twistPointers.set(pid, { x: event.clientX, y: event.clientY });
-                if (twistPointers.size < 2) lastTwistAngle = null;
+                if (twistPointers.size < 2) { lastTwistAngle = null; lastPinchDist = null; }
               } else if (type === BABYLON.PointerEventTypes.POINTERUP || type === BABYLON.PointerEventTypes.POINTEROUT) {
                 twistPointers.delete(pid);
                 lastTwistAngle = null;
+                lastPinchDist = null;
               } else if (type === BABYLON.PointerEventTypes.POINTERMOVE && twistPointers.size >= 2 && placed) {
                 if (!activeMesh) return;
                 twistPointers.set(pid, { x: event.clientX, y: event.clientY });
                 const [p1, p2] = [...twistPointers.values()];
-                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                const dx = p2.x - p1.x, dy = p2.y - p1.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (lastPinchDist !== null && lastPinchDist > 1) {
+                  const sf = dist / lastPinchDist;
+                  if (sf > 0.85 && sf < 1.15) activeMesh.scaling.scaleInPlace(sf);
+                }
+                lastPinchDist = dist;
+                const angle = Math.atan2(dy, dx);
                 if (lastTwistAngle !== null) rotateMeshY(activeMesh, angle - lastTwistAngle);
                 lastTwistAngle = angle;
               }
@@ -483,9 +493,12 @@ async function setupXR(scene) {
               activePointerCount = 0;
               if (activeMesh) activeMesh.behaviors.filter(b => b instanceof BABYLON.PointerDragBehavior).forEach(b => activeMesh.removeBehavior(b));
               if (placementGuide) placementGuide.classList.add("active");
+              if (instrAutoHideTimer) { clearTimeout(instrAutoHideTimer); instrAutoHideTimer = null; }
               if (arControlsEl) arControlsEl.style.display = "none";
               const arInstrEl2 = document.getElementById("ar-instructions");
               if (arInstrEl2) arInstrEl2.style.display = "none";
+              const arInfoBtnEl = document.getElementById("ar-info-btn");
+              if (arInfoBtnEl) arInfoBtnEl.style.display = "none";
               arReticle.setEnabled(false);
               setPlacementPhase("scanning");
 
@@ -532,7 +545,13 @@ async function setupXR(scene) {
               if (placementGuide) placementGuide.classList.remove("active");
               if (arControlsEl) arControlsEl.style.display = "block";
               const arInstrEl2 = document.getElementById("ar-instructions");
-              if (arInstrEl2) arInstrEl2.style.display = "block";
+              if (arInstrEl2) {
+                arInstrEl2.style.display = "block";
+                if (instrAutoHideTimer) clearTimeout(instrAutoHideTimer);
+                instrAutoHideTimer = setTimeout(() => { arInstrEl2.style.display = "none"; instrAutoHideTimer = null; }, 8000);
+              }
+              const arInfoBtnEl = document.getElementById("ar-info-btn");
+              if (arInfoBtnEl) arInfoBtnEl.style.display = "flex";
               setPlacementPhase("placed");
             }
 
@@ -558,6 +577,32 @@ async function setupXR(scene) {
             if (elSU) elSU.onclick = () => { if (activeMesh) activeMesh.scaling.scaleInPlace(1.25); };
             if (elSD) elSD.onclick = () => { if (activeMesh) activeMesh.scaling.scaleInPlace(0.8); };
             if (elRP) elRP.onclick = () => { if (placed) enterPlacementMode(); };
+
+            const elReset = document.getElementById("ar-reset-btn");
+            const elInstrClose = document.getElementById("ar-instr-close");
+            const elInfoBtn = document.getElementById("ar-info-btn");
+
+            if (elReset) elReset.onclick = () => {
+              if (!activeMesh) return;
+              const cam = scene.activeCamera;
+              const fwd = cam.getForwardRay().direction;
+              activeMesh.position = cam.position.add(fwd.scale(1.5));
+            };
+
+            function showInstructions() {
+              const panel = document.getElementById("ar-instructions");
+              if (!panel) return;
+              panel.style.display = "block";
+              if (instrAutoHideTimer) clearTimeout(instrAutoHideTimer);
+              instrAutoHideTimer = setTimeout(() => { panel.style.display = "none"; instrAutoHideTimer = null; }, 8000);
+            }
+
+            if (elInstrClose) elInstrClose.onclick = () => {
+              if (instrAutoHideTimer) { clearTimeout(instrAutoHideTimer); instrAutoHideTimer = null; }
+              const panel = document.getElementById("ar-instructions");
+              if (panel) panel.style.display = "none";
+            };
+            if (elInfoBtn) elInfoBtn.onclick = showInstructions;
 
             enterPlacementMode();
           }

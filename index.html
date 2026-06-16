@@ -54,11 +54,12 @@
     <div id="ar-controls" style="display:none; margin-top:8px;">
       <div class="ar-btn-row">
         <button id="ar-rotate-left" class="ar-btn">&#8634; Rotate</button>
-        <button id="ar-reposition-btn" class="ar-btn">Reposition</button>
+        <button id="ar-reposition-btn" class="ar-btn">Rescan</button>
         <button id="ar-rotate-right" class="ar-btn">Rotate &#8635;</button>
       </div>
-      <div class="ar-btn-row" style="margin-top:5px;">
+      <div class="ar-btn-row" style="margin-top:6px;">
         <button id="ar-scale-down" class="ar-btn">Scale &minus;</button>
+        <button id="ar-reset-btn" class="ar-btn">Reset</button>
         <button id="ar-scale-up" class="ar-btn">Scale +</button>
       </div>
     </div>
@@ -71,11 +72,14 @@
   <div class="placement-guide" id="placement-guide"></div>
 
   <button id="ar-exit-btn" class="ar-btn ar-exit-btn-float" style="display:none;">Exit AR</button>
+  <button id="ar-info-btn" class="ar-btn ar-info-btn-float" style="display:none;">&#9432;</button>
   <div id="ar-instructions" class="ar-instructions-panel" style="display:none;">
-    <div class="ar-instr-title">AR Guide</div>
-    <div class="ar-instr-line">Move: Drag the object</div>
-    <div class="ar-instr-line">Scale: Pinch two fingers</div>
-    <div class="ar-instr-line">Rotate: Two-finger twist</div>
+    <button id="ar-instr-close" class="ar-instr-close-btn">&#10005;</button>
+    <div class="ar-instr-title">AR Controls</div>
+    <div class="ar-instr-line">&#x1F446; Drag to move</div>
+    <div class="ar-instr-line">&#x1F91F; Pinch to scale</div>
+    <div class="ar-instr-line">&#x1F501; Two-finger twist to rotate</div>
+    <div class="ar-instr-line ar-instr-hint">Use buttons below for precise control</div>
   </div>
 
   <canvas id="renderCanvas"></canvas>
