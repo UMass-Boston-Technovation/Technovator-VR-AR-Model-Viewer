@@ -96,3 +96,18 @@ input, select { border: 1px solid #333; background: #222; color: #eee; padding: 
 .ar-instr-title { font-weight: 700; color: #93c5fd; margin-bottom: 8px; font-size: 15px; }
 .ar-instr-line { color: #e2e8f0; line-height: 2; }
 .ar-instr-hint { color: #94a3b8; font-size: 12px; line-height: 1.6; margin-top: 4px; }
+.ar-return-btn-float {
+  position: fixed; bottom: 50px; right: 16px; z-index: 10;
+  background: rgba(15,23,42,0.85); border-color: rgba(99,102,241,0.5);
+  color: #93c5fd; font-size: 14px; padding: 10px 18px;
+}
+.ar-return-btn-float:active { background: rgba(30,42,80,0.9); }
+.ar-bottom-info {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 9;
+  background: rgba(10,12,28,0.88); color: #94a3b8;
+  font-size: 12px; text-align: center;
+  padding: 8px 16px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 8px));
+  border-top: 1px solid rgba(99,102,241,0.25);
+  pointer-events: none;
+}

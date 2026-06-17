@@ -143,6 +143,10 @@ async function setupXR(scene) {
     if (arInstrEl) arInstrEl.style.display = "none";
     if (arInfoBtnEl) arInfoBtnEl.style.display = "none";
     if (arExitEl) { arExitEl.style.display = "none"; arExitEl.onclick = null; }
+    const arReturnCleanEl = document.getElementById("ar-return-btn");
+    const arBottomInfoCleanEl = document.getElementById("ar-bottom-info");
+    if (arReturnCleanEl) { arReturnCleanEl.style.display = "none"; arReturnCleanEl.onclick = null; }
+    if (arBottomInfoCleanEl) arBottomInfoCleanEl.style.display = "none";
     ["ar-rotate-left", "ar-rotate-right", "ar-scale-up", "ar-scale-down", "ar-reposition-btn", "ar-reset-btn", "ar-instr-close", "ar-info-btn"].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.onclick = null;
@@ -379,6 +383,20 @@ async function setupXR(scene) {
               };
             }
 
+            const arReturnEl = document.getElementById("ar-return-btn");
+            if (arReturnEl) {
+              arReturnEl.style.display = "block";
+              arReturnEl.onclick = async () => {
+                try { await xr.baseExperience.exitXRAsync(); } catch(e) {}
+              };
+            }
+
+            const arBottomInfoEl = document.getElementById("ar-bottom-info");
+            if (arBottomInfoEl) {
+              arBottomInfoEl.style.display = "block";
+              arBottomInfoEl.textContent = "Tap on a flat surface to place the model";
+            }
+
             normalizeModelSize(mesh, 0.3);
             let placed = false;
             let activePointerCount = 0;
@@ -501,6 +519,7 @@ async function setupXR(scene) {
               if (arInfoBtnEl) arInfoBtnEl.style.display = "none";
               arReticle.setEnabled(false);
               setPlacementPhase("scanning");
+              if (arBottomInfoEl) arBottomInfoEl.textContent = "Tap on a flat surface to place the model";
 
               if (!followObserver) {
                 followObserver = scene.onBeforeRenderObservable.add(() => {
@@ -553,6 +572,7 @@ async function setupXR(scene) {
               const arInfoBtnEl = document.getElementById("ar-info-btn");
               if (arInfoBtnEl) arInfoBtnEl.style.display = "flex";
               setPlacementPhase("placed");
+              if (arBottomInfoEl) arBottomInfoEl.textContent = "Drag • Pinch to scale • Twist to rotate";
             }
 
             // Tap detection — canvas.click does NOT fire in WebXR
