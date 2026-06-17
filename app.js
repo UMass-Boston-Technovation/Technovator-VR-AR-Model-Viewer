@@ -95,6 +95,10 @@ async function setupXR(scene) {
   let vrHudPlane = null;
   let arReticle = null;
   let instrAutoHideTimer = null;
+  let arLight = null;
+  let shadowGenerator = null;
+  let shadowPlane = null;
+  let arShadowObserver = null;
 
   function getModelRoot() {
     if (scene._modelRoot) return scene._modelRoot;
@@ -132,6 +136,10 @@ async function setupXR(scene) {
 
   function disposeARSession() {
     if (instrAutoHideTimer) { clearTimeout(instrAutoHideTimer); instrAutoHideTimer = null; }
+    if (arShadowObserver) { scene.onBeforeRenderObservable.remove(arShadowObserver); arShadowObserver = null; }
+    if (arLight) { arLight.dispose(); arLight = null; }
+    if (shadowGenerator) { shadowGenerator.dispose(); shadowGenerator = null; }
+    if (shadowPlane) { shadowPlane.dispose(); shadowPlane = null; }
     if (arReticle && !arReticle.isDisposed()) { arReticle.dispose(); arReticle = null; }
     const arControlsEl = document.getElementById("ar-controls");
     const arSwitcherEl = document.getElementById("ar-model-switcher");
@@ -394,6 +402,37 @@ async function setupXR(scene) {
             reticleMat.disableLighting = true;
             arReticle.material = reticleMat;
 
+            // --- AR Shadow Setup ---
+            arLight = new BABYLON.DirectionalLight("arLight", new BABYLON.Vector3(-1, -2, -1), scene);
+            arLight.position = new BABYLON.Vector3(0, 5, 0);
+            arLight.intensity = 0.7;
+            
+            shadowGenerator = new BABYLON.ShadowGenerator(1024, arLight);
+            shadowGenerator.useBlurExponentialShadowMap = true;
+            shadowGenerator.blurKernel = 32;
+
+            shadowPlane = BABYLON.MeshBuilder.CreatePlane("shadowPlane", { size: 10 }, scene);
+            shadowPlane.rotation.x = Math.PI / 2; // Flat on the ground
+            shadowPlane.receiveShadows = true;
+            shadowPlane.isPickable = false;
+            const shadowMat = new BABYLON.BackgroundMaterial("shadowMat", scene);
+            shadowMat.primaryColor = BABYLON.Color3.Black();
+            shadowMat.shadowOnly = true; // Makes the plane invisible except for shadows
+            shadowMat.alpha = 0.5; // Adjust the darkness of the shadow
+            shadowPlane.material = shadowMat;
+            shadowPlane.setEnabled(false); // Hidden until model is placed
+
+            // Automatically add all child meshes of the model to the shadow generator
+            shadowGenerator.addShadowCaster(activeMesh, true);
+
+            // Keep the shadow plane directly underneath the active mesh
+            arShadowObserver = scene.onBeforeRenderObservable.add(() => {
+              if (placed && activeMesh && shadowPlane) {
+                shadowPlane.position.copyFrom(activeMesh.position);
+              }
+            });
+            // -----------------------
+
             const arControlsEl = document.getElementById("ar-controls");
             const arSwitcherEl = document.getElementById("ar-model-switcher");
             const arModelListEl = document.getElementById("ar-model-list");
@@ -439,6 +478,7 @@ async function setupXR(scene) {
                           newRoot.addBehavior(drag);
                         }
                         activeMesh = newRoot;
+                        shadowGenerator.addShadowCaster(activeMesh, true);
                       }
                       arModelListEl.querySelectorAll(".ar-model-chip").forEach(c => c.classList.remove("active"));
                       chip.classList.add("active");
@@ -500,6 +540,7 @@ async function setupXR(scene) {
               const arInfoBtnEl = document.getElementById("ar-info-btn");
               if (arInfoBtnEl) arInfoBtnEl.style.display = "none";
               arReticle.setEnabled(false);
+              if (shadowPlane) shadowPlane.setEnabled(false);
               setPlacementPhase("scanning");
 
               if (!followObserver) {
@@ -552,6 +593,7 @@ async function setupXR(scene) {
               }
               const arInfoBtnEl = document.getElementById("ar-info-btn");
               if (arInfoBtnEl) arInfoBtnEl.style.display = "flex";
+              if (shadowPlane) shadowPlane.setEnabled(true);
               setPlacementPhase("placed");
             }
 
@@ -842,7 +884,7 @@ if (modelSelect) {
 // ==============================
 (async function main() {
   if (canvas) {
-    engine = new BABYLON.Engine(canvas, true);
+    engine = new BABYLON.Engine(canvas, true, { xrCompatible: true });
     currentScene = await createScene(engine, canvas);
     await setupXR(currentScene);
     engine.runRenderLoop(() => currentScene.render());
