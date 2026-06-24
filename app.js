@@ -189,9 +189,10 @@ async function setupXR(scene) {
       }
 
       xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
+        requiredFeatures: isVR ? [] : ["dom-overlay"],
         optionalFeatures: isVR
           ? ["local-floor", "bounded-floor", "hand-tracking"]
-          : ["hit-test", "dom-overlay", "bounded-floor"],
+          : ["hit-test", "bounded-floor"],
         ...(isVR ? {} : { domOverlay: { root: document.body } }),
       });
 
