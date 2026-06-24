@@ -39,6 +39,5 @@ npm start
 
 Tips
 - For AR, test on a device with WebXR support (modern Android with Chrome or other WebXR-enabled browsers). Desktop browsers typically only support immersive VR via a headset.
-- If the model doesn't appear, check the browser console for loader errors and ensure the model filename in `index.html` matches the file in `3D Models/`.
 
 Enjoy!
