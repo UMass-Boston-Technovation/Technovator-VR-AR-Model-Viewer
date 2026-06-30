@@ -173,7 +173,7 @@ async function setupXR(scene) {
 
     try {
       if (isVR) {
-        scene.clearColor = new BABYLON.Color4(0.05, 0.05, 0.15, 1.0);
+        scene.clearColor = new BABYLON.Color4(0.4, 0.0, 0.6, 1.0);
         if (!scene.getNodeByName("BackgroundHelper")) {
           const env = scene.createDefaultEnvironment({ createGround: true, groundSize: 20, createSkybox: true, skyboxSize: 50 });
           vrGroundMesh = env && env.ground ? env.ground : null;
