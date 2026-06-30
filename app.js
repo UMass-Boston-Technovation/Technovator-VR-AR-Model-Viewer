@@ -300,7 +300,7 @@ async function setupXR(scene) {
 
               const panelBg = new BABYLON.GUI.Rectangle();
               panelBg.width = 1; panelBg.height = 1;
-              panelBg.background = "#0f172aee";
+              panelBg.background = "#4108b4ee";
               panelBg.cornerRadius = 14;
               panelBg.thickness = 1.5;
               panelBg.color = "#6366f1";
