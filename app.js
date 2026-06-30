@@ -658,7 +658,7 @@ async function setupXR(scene) {
           if (isVR) disposeVROverlays(); else disposeARSession();
           if (xrInfo) xrInfo.classList.remove("active");
           if (placementGuide) placementGuide.classList.remove("active");
-          if (isVR) scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+          if (isVR) scene.clearColor = new BABYLON.Color4(0.4, 0.0, 0.6, 1.0);
         }
       });
 
