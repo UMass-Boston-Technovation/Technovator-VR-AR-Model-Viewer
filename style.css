@@ -96,3 +96,41 @@ input, select { border: 1px solid #333; background: #222; color: #eee; padding: 
 .ar-instr-title { font-weight: 700; color: #93c5fd; margin-bottom: 8px; font-size: 15px; }
 .ar-instr-line { color: #e2e8f0; line-height: 2; }
 .ar-instr-hint { color: #94a3b8; font-size: 12px; line-height: 1.6; margin-top: 4px; }
+
+/* Viewer controls: zoom slider + reset */
+#viewer-controls {
+  position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
+  z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+#zoom-controls {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: rgba(0,0,0,0.55); padding: 8px 7px; border-radius: 22px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.zoom-ctrl-btn {
+  appearance: none; border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(25,25,45,0.85); color: #eee;
+  width: 30px; height: 30px; border-radius: 50%; cursor: pointer;
+  font-size: 18px; font-weight: bold; display: flex;
+  align-items: center; justify-content: center;
+  touch-action: manipulation; transition: background 0.15s; padding: 0; line-height: 1;
+}
+.zoom-ctrl-btn:active { background: rgba(99,102,241,0.6); }
+#zoom-slider {
+  writing-mode: vertical-lr;
+  -webkit-appearance: slider-vertical;
+  height: 100px; width: 8px; cursor: pointer; accent-color: #6366f1;
+}
+
+/* Always-visible UI toggle */
+#toggle-ui-btn {
+  position: fixed; bottom: 14px; right: 14px; z-index: 10000;
+  appearance: none; border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(20,20,40,0.85); color: #cbd5e1;
+  padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  font-size: 12px; font-weight: 600; touch-action: manipulation;
+  transition: background 0.15s; white-space: nowrap;
+}
+#toggle-ui-btn:active { background: rgba(99,102,241,0.5); }
+
+.ui-collapsed { display: none !important; }

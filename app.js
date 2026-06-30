@@ -52,6 +52,14 @@ addClick("btn-choose-ar", () => {
   updateXRButton();
 });
 
+addClick("toggle-ui-btn", () => {
+  const btn = document.getElementById("toggle-ui-btn");
+  const targets = [document.querySelector(".note"), document.getElementById("viewer-controls")];
+  const isCollapsed = targets[0] && targets[0].classList.contains("ui-collapsed");
+  targets.forEach(el => { if (el) el.classList.toggle("ui-collapsed"); });
+  if (btn) btn.textContent = isCollapsed ? "Hide UI" : "Show UI";
+});
+
 async function createScene(engine, canvas, modelUrl = null) {
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
@@ -820,6 +828,7 @@ addClick("logout-btn", async () => {
   if (currentScene) currentScene.dispose();
   currentScene = await createScene(engine, canvas);
   await setupXR(currentScene);
+  setupViewerControls(currentScene);
   engine.stopRenderLoop();
   engine.runRenderLoop(() => currentScene.render());
   await checkUser();
@@ -875,8 +884,55 @@ if (modelSelect) {
   if (currentScene) currentScene.dispose();
   currentScene = await createScene(engine, canvas, modelUrl);
   await setupXR(currentScene);
+  setupViewerControls(currentScene);
   engine.stopRenderLoop();
   engine.runRenderLoop(() => currentScene.render());
+  };
+}
+
+// ==============================
+//  VIEWER CONTROLS (zoom + reset)
+// ==============================
+function setupViewerControls(scene) {
+  const zoomSlider = document.getElementById("zoom-slider");
+  if (!zoomSlider || !scene.activeCamera) return;
+  const cam = scene.activeCamera;
+
+  cam.lowerRadiusLimit = 1;
+  cam.upperRadiusLimit = 20;
+  zoomSlider.value = cam.radius;
+
+  cam.onViewMatrixChangedObservable.add(() => {
+    zoomSlider.value = cam.radius;
+  });
+
+  zoomSlider.oninput = () => {
+    if (scene.activeCamera) scene.activeCamera.radius = parseFloat(zoomSlider.value);
+  };
+
+  const step = 1.5;
+  const zoomIn = document.getElementById("zoom-in-btn");
+  const zoomOut = document.getElementById("zoom-out-btn");
+  if (zoomIn) zoomIn.onclick = () => {
+    const v = Math.max(1, parseFloat(zoomSlider.value) - step);
+    zoomSlider.value = v;
+    if (scene.activeCamera) scene.activeCamera.radius = v;
+  };
+  if (zoomOut) zoomOut.onclick = () => {
+    const v = Math.min(20, parseFloat(zoomSlider.value) + step);
+    zoomSlider.value = v;
+    if (scene.activeCamera) scene.activeCamera.radius = v;
+  };
+
+  const resetBtn = document.getElementById("reset-view-btn");
+  if (resetBtn) resetBtn.onclick = () => {
+    const c = scene.activeCamera;
+    if (!c) return;
+    c.alpha = Math.PI / 2;
+    c.beta = Math.PI / 3;
+    c.radius = 5;
+    c.target = BABYLON.Vector3.Zero();
+    zoomSlider.value = 5;
   };
 }
 
@@ -888,6 +944,7 @@ if (modelSelect) {
     engine = new BABYLON.Engine(canvas, true, { xrCompatible: true });
     currentScene = await createScene(engine, canvas);
     await setupXR(currentScene);
+    setupViewerControls(currentScene);
     engine.runRenderLoop(() => currentScene.render());
     window.addEventListener("resize", () => engine.resize());
   }
