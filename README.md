@@ -41,3 +41,4 @@ Tips
 - For AR, test on a device with WebXR support (modern Android with Chrome or other WebXR-enabled browsers). Desktop browsers typically only support immersive VR via a headset.
 
 Enjoy!
+# technovator-360-viewer
