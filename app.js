@@ -14,6 +14,10 @@ let engine, currentScene;
 let selectedSessionMode = null;
 const canvas = document.getElementById("renderCanvas");
 
+// Standalone headsets only show the real room (passthrough) in an immersive-ar
+// session, and their browsers have no DOM overlay, so AR there uses an in-world panel.
+const IS_HEADSET = /OculusBrowser|Quest|Pico|Wolvic/i.test(navigator.userAgent);
+
 function addClick(id, fn) {
   const el = document.getElementById(id);
   if (el) el.onclick = fn;
@@ -30,7 +34,8 @@ function updateXRButton() {
   if (selectedSessionMode) {
     btnXR.disabled = false;
     btnXR.style.pointerEvents = "auto";
-    btnXR.innerText = selectedSessionMode === "immersive-vr" ? "Enter VR" : "Enter AR";
+    if (selectedSessionMode === "immersive-vr") btnXR.innerText = "Enter VR";
+    else btnXR.innerText = IS_HEADSET ? "Enter Passthrough" : "Enter AR";
   } else {
     btnXR.disabled = true;
     btnXR.style.pointerEvents = "none";
@@ -51,6 +56,13 @@ addClick("btn-choose-ar", () => {
   if (modal) modal.style.display = "none";
   updateXRButton();
 });
+
+if (IS_HEADSET) {
+  const vrChoice = document.getElementById("btn-choose-vr");
+  const arChoice = document.getElementById("btn-choose-ar");
+  if (vrChoice) vrChoice.textContent = "Virtual Room (VR)";
+  if (arChoice) arChoice.textContent = "Passthrough (AR)";
+}
 
 addClick("toggle-ui-btn", () => {
   const btn = document.getElementById("toggle-ui-btn");
@@ -123,7 +135,8 @@ async function setupXR(scene) {
   function normalizeModelSize(mesh, targetMeters) {
     const b = mesh.getHierarchyBoundingVectors(true);
     const size = b.max.subtract(b.min).length();
-    if (size > 0) mesh.scaling.setAll(targetMeters / size);
+    // Scale relative to the current size: works after earlier resizes and keeps glTF's mirrored z
+    if (size > 0) mesh.scaling.scaleInPlace(targetMeters / size);
   }
 
   function rotateMeshY(mesh, delta) {
@@ -134,6 +147,14 @@ async function setupXR(scene) {
     } else {
       mesh.rotation.y += delta;
     }
+  }
+
+  // Behaviors added while the scene is still loading (e.g. controller models) attach
+  // later, and detaching one that never attached throws, so never let that escape.
+  function clearBehaviors(m) {
+    m.behaviors.slice().forEach(b => {
+      try { m.removeBehavior(b); } catch (e) { console.warn("Behavior cleanup failed:", e); }
+    });
   }
 
   function disposeVROverlays() {
@@ -165,6 +186,81 @@ async function setupXR(scene) {
     });
   }
 
+  // In-world control panel for headsets (VR and passthrough), where HTML overlays can't be shown.
+  // buttons: [{ label, onClick(btn), bg?, hoverBg?, color? }]
+  function createHeadsetPanel(title, lines, buttons) {
+    const pxHeight = 16 + 37 + lines.length * 31 + 10 + buttons.length * 46 + 24;
+    const plane = BABYLON.MeshBuilder.CreatePlane("vrInfoPanel", { width: 0.5, height: pxHeight / 1000 }, scene);
+    plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+    const panelTex = BABYLON.GUI.AdvancedDynamicTexture.CreateForMesh(plane, 500, pxHeight);
+
+    const panelBg = new BABYLON.GUI.Rectangle();
+    panelBg.width = 1; panelBg.height = 1;
+    panelBg.background = "#4108b4ee";
+    panelBg.cornerRadius = 14;
+    panelBg.thickness = 1.5;
+    panelBg.color = "#6366f1";
+    panelTex.addControl(panelBg);
+
+    const panelStack = new BABYLON.GUI.StackPanel();
+    panelStack.paddingTop = "16px";
+    panelStack.paddingLeft = "16px";
+    panelStack.paddingRight = "16px";
+    panelStack.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+    panelBg.addControl(panelStack);
+
+    const addLine = (text, color, size) => {
+      const t = new BABYLON.GUI.TextBlock();
+      t.text = text; t.color = color; t.fontSize = size;
+      t.height = `${size + 12}px`;
+      t.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+      panelStack.addControl(t);
+    };
+    addLine(title, "#a5b4fc", 25);
+    lines.forEach(l => addLine(l, "#cbd5e1", 19));
+
+    const gap = new BABYLON.GUI.Rectangle();
+    gap.height = "10px"; gap.thickness = 0;
+    panelStack.addControl(gap);
+
+    buttons.forEach(({ label, onClick, bg = "#1e3a5f", hoverBg = "#2d5a8e", color = "white" }) => {
+      const btn = BABYLON.GUI.Button.CreateSimpleButton(`vrBtn_${label}`, label);
+      btn.width = "320px"; btn.height = "46px";
+      btn.color = color; btn.fontSize = 19;
+      btn.background = bg; btn.cornerRadius = 8; btn.paddingBottom = "7px";
+      btn.onPointerEnterObservable.add(() => { btn.background = hoverBg; });
+      btn.onPointerOutObservable.add(() => { btn.background = bg; });
+      btn.onPointerClickObservable.add(() => onClick(btn));
+      panelStack.addControl(btn);
+    });
+    return plane;
+  }
+
+  // The option after the current one in the model dropdown, wrapping around.
+  function nextModelOption() {
+    const selectEl = document.getElementById("model-select");
+    if (!selectEl) return null;
+    const opts = Array.from(selectEl.options).filter(o => o.value);
+    if (opts.length < 2) return null;
+    const i = opts.findIndex(o => o.value === selectEl.value);
+    return opts[(i + 1) % opts.length];
+  }
+
+  // Loads one of the user's models into this scene and removes the old one.
+  async function replaceModel(filename) {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return null;
+    const modelUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${user.id}/${filename}`;
+    const oldRoot = getModelRoot();
+    const result = await BABYLON.SceneLoader.ImportMeshAsync("", modelUrl, "", scene);
+    if (!result.meshes.length) return null;
+    if (oldRoot) oldRoot.dispose(false, true);
+    result.meshes.forEach(m => { m.isPickable = true; });
+    const first = result.meshes[0];
+    scene._modelRoot = (first.parent instanceof BABYLON.AbstractMesh) ? first.parent : first;
+    return scene._modelRoot;
+  }
+
   btnXR.onclick = async () => {
     if (!selectedSessionMode) return;
 
@@ -177,15 +273,20 @@ async function setupXR(scene) {
     }
 
     const isVR = selectedSessionMode === "immersive-vr";
+    // Passthrough on a headset: AR session, but controlled like VR with an in-world panel
+    const isHeadsetAR = !isVR && IS_HEADSET;
+    const usesHeadsetPanel = isVR || isHeadsetAR;
     let vrGroundMesh = null;
 
     try {
+      const bgRoot = scene.getNodeByName("BackgroundHelper");
       if (isVR) {
         scene.clearColor = new BABYLON.Color4(0.4, 0.0, 0.6, 1.0);
-        if (!scene.getNodeByName("BackgroundHelper")) {
+        if (!bgRoot) {
           const env = scene.createDefaultEnvironment({ createGround: true, groundSize: 20, createSkybox: true, skyboxSize: 50 });
           vrGroundMesh = env && env.ground ? env.ground : null;
         } else {
+          bgRoot.setEnabled(true);
           vrGroundMesh = scene.getMeshByName("BackgroundPlane") || null;
         }
         if (vrGroundMesh && !vrGroundMesh.physicsImpostor) {
@@ -194,10 +295,14 @@ async function setupXR(scene) {
             { mass: 0, restitution: 0.3, friction: 1 }, scene
           );
         }
+      } else {
+        // Anything opaque behind the model (a VR skybox or colored background) hides the camera feed
+        scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+        if (bgRoot) bgRoot.setEnabled(false);
       }
 
       xr = await BABYLON.WebXRDefaultExperience.CreateAsync(scene, {
-        requiredFeatures: isVR ? [] : ["dom-overlay"],
+        disableTeleportation: !isVR,
         optionalFeatures: isVR
           ? ["local-floor", "bounded-floor", "hand-tracking"]
           : ["hit-test", "bounded-floor"],
@@ -206,7 +311,7 @@ async function setupXR(scene) {
 
       let latestHit = null;
       let hasHitTest = false;
-      if (!isVR) {
+      if (!isVR && !isHeadsetAR) {
         try {
           const hitTest = xr.baseExperience.featuresManager.enableFeature(
             BABYLON.WebXRFeatureName.HIT_TEST, "latest"
@@ -225,7 +330,7 @@ async function setupXR(scene) {
         } catch (e) { console.warn("Light estimation unavailable:", e); }
       }
 
-      if (isVR) {
+      if (usesHeadsetPanel) {
         try {
           xr.baseExperience.featuresManager.enableFeature(
             BABYLON.WebXRFeatureName.POINTER_SELECTION, "stable",
@@ -233,20 +338,23 @@ async function setupXR(scene) {
           );
         } catch (e) { console.warn("VR pointer selection unavailable:", e); }
 
-        try {
-          xr.baseExperience.featuresManager.enableFeature(
-            BABYLON.WebXRFeatureName.TELEPORTATION, "stable", {
-              xrInput: xr.input,
-              floorMeshes: vrGroundMesh ? [vrGroundMesh] : [],
-            }
-          );
-        } catch (e) { console.warn("Teleportation unavailable:", e); }
+        if (isVR) {
+          try {
+            xr.baseExperience.featuresManager.enableFeature(
+              BABYLON.WebXRFeatureName.TELEPORTATION, "stable", {
+                xrInput: xr.input,
+                floorMeshes: vrGroundMesh ? [vrGroundMesh] : [],
+              }
+            );
+          } catch (e) { console.warn("Teleportation unavailable:", e); }
+        }
 
         try {
+          // Optional (last arg false): headsets without hand tracking can still start the session
           xr.baseExperience.featuresManager.enableFeature(
             BABYLON.WebXRFeatureName.HAND_TRACKING, "latest", {
               xrInput: xr.input,
-            }
+            }, true, false
           );
         } catch (e) { console.warn("Hand tracking unavailable:", e); }
       }
@@ -257,7 +365,7 @@ async function setupXR(scene) {
       xr.baseExperience.onStateChangedObservable.add(state => {
         if (state === BABYLON.WebXRState.IN_XR) {
           if (xrInfo) xrInfo.classList.add("active");
-          const mesh = getModelRoot();
+          let mesh = getModelRoot();
 
           if (!mesh) {
             setInfoText("Select a model first");
@@ -265,26 +373,32 @@ async function setupXR(scene) {
             return;
           }
 
-          mesh.behaviors.slice().forEach(b => mesh.removeBehavior(b));
+          clearBehaviors(mesh);
           mesh.setEnabled(true);
 
-          if (isVR) {
-            // ── VR MODE ──
-            normalizeModelSize(mesh, 1.0);
+          if (usesHeadsetPanel) {
+            // ── HEADSET MODE (VR, or passthrough AR) ──
+            const modelSize = isVR ? 1.0 : 0.5;
+            normalizeModelSize(mesh, modelSize);
 
             function vrSpawnPositions() {
               const camPos = scene.activeCamera.position;
               const forward = scene.activeCamera.getForwardRay().direction;
               return {
-                mesh: camPos.add(forward.scale(1.2)).add(new BABYLON.Vector3(0, 0.1, 0)),
-                panel: camPos.add(forward.scale(1.0)).add(new BABYLON.Vector3(-0.6, 0.5, 0)),
+                mesh: camPos.add(forward.scale(isVR ? 1.2 : 1.0)).add(new BABYLON.Vector3(0, isVR ? 0.1 : -0.2, 0)),
+                panel: camPos.add(forward.scale(1.0)).add(new BABYLON.Vector3(-0.6, isVR ? 0.5 : 0.1, 0)),
               };
+            }
+
+            function attachGrabBehaviors(m) {
+              // Attach now: controller models may still be loading, which would otherwise delay it
+              m.addBehavior(new BABYLON.SixDofDragBehavior(), true);
+              m.addBehavior(new BABYLON.MultiPointerScaleBehavior(), true);
             }
 
             const spawnPos = vrSpawnPositions();
             mesh.position = spawnPos.mesh;
-            mesh.addBehavior(new BABYLON.SixDofDragBehavior());
-            mesh.addBehavior(new BABYLON.MultiPointerScaleBehavior());
+            attachGrabBehaviors(mesh);
 
             // Right thumbstick X axis → rotate model around Y
             vrRotateObserver = scene.onBeforeRenderObservable.add(() => {
@@ -300,92 +414,77 @@ async function setupXR(scene) {
             });
 
             if (BABYLON.GUI) {
-              // -- Persistent VR info + control panel (instructions + buttons) --
-              vrHelpPlane = BABYLON.MeshBuilder.CreatePlane("vrInfoPanel", { width: 0.5, height: 0.58 }, scene);
-              vrHelpPlane.position = vrSpawnPositions().panel;
-              vrHelpPlane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-              const panelTex = BABYLON.GUI.AdvancedDynamicTexture.CreateForMesh(vrHelpPlane, 500, 580);
-
-              const panelBg = new BABYLON.GUI.Rectangle();
-              panelBg.width = 1; panelBg.height = 1;
-              panelBg.background = "#4108b4ee";
-              panelBg.cornerRadius = 14;
-              panelBg.thickness = 1.5;
-              panelBg.color = "#6366f1";
-              panelTex.addControl(panelBg);
-
-              const panelStack = new BABYLON.GUI.StackPanel();
-              panelStack.paddingTop = "16px";
-              panelStack.paddingLeft = "16px";
-              panelStack.paddingRight = "16px";
-              panelBg.addControl(panelStack);
-
-              const addLine = (text, color = "#cbd5e1", size = 20) => {
-                const t = new BABYLON.GUI.TextBlock();
-                t.text = text; t.color = color; t.fontSize = size;
-                t.height = `${size + 12}px`;
-                t.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-                panelStack.addControl(t);
-              };
-
-              addLine("VR Controls", "#a5b4fc", 25);
-              addLine("Move: Grip & drag", "#cbd5e1", 19);
-              addLine("Rotate: Right stick", "#cbd5e1", 19);
-              addLine("Scale: Both grips", "#cbd5e1", 19);
-              addLine("Teleport: Left stick", "#cbd5e1", 19);
-
-              const gap = new BABYLON.GUI.Rectangle();
-              gap.height = "10px"; gap.thickness = 0;
-              panelStack.addControl(gap);
-
-              const makeBtn = (label, bg, hoverBg, textColor, onClick) => {
-                const btn = BABYLON.GUI.Button.CreateSimpleButton(`vrBtn_${label}`, label);
-                btn.width = "320px"; btn.height = "46px";
-                btn.color = textColor; btn.fontSize = 19;
-                btn.background = bg; btn.cornerRadius = 8; btn.paddingBottom = "7px";
-                btn.onPointerEnterObservable.add(() => { btn.background = hoverBg; });
-                btn.onPointerOutObservable.add(() => { btn.background = bg; });
-                btn.onPointerClickObservable.add(onClick);
-                panelStack.addControl(btn);
-                return btn;
-              };
-
-              makeBtn("Reset Position", "#1e3a5f", "#2d5a8e", "white", () => {
-                const pos = vrSpawnPositions();
-                mesh.position = pos.mesh;
-                vrHelpPlane.position = pos.panel;
-                if (mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
-                else mesh.rotation = BABYLON.Vector3.Zero();
-                normalizeModelSize(mesh, 1.0);
-              });
-              makeBtn("Scale +", "#1e3a5f", "#2d5a8e", "white", () => mesh.scaling.scaleInPlace(1.25));
-              makeBtn("Scale -", "#1e3a5f", "#2d5a8e", "white", () => mesh.scaling.scaleInPlace(0.8));
-
               let physicsEnabled = false;
-              const physBtn = makeBtn("Enable Physics", "#163316", "#1f4d1f", "#86efac", () => {
-                if (!physicsEnabled) {
+              let physBtn = null;
+              function setPhysics(on) {
+                if (on) {
                   mesh.behaviors.filter(b => b instanceof BABYLON.SixDofDragBehavior)
                     .forEach(b => mesh.removeBehavior(b));
                   mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
                     mesh, BABYLON.PhysicsImpostor.BoxImpostor,
                     { mass: 1, restitution: 0.6, friction: 0.4 }, scene
                   );
-                  physicsEnabled = true;
-                  if (physBtn.children[0]) physBtn.children[0].text = "Disable Physics";
                 } else {
                   if (mesh.physicsImpostor) { mesh.physicsImpostor.dispose(); mesh.physicsImpostor = null; }
-                  mesh.addBehavior(new BABYLON.SixDofDragBehavior());
+                  mesh.addBehavior(new BABYLON.SixDofDragBehavior(), true);
                   mesh.position = vrSpawnPositions().mesh;
-                  physicsEnabled = false;
-                  if (physBtn.children[0]) physBtn.children[0].text = "Enable Physics";
                 }
-              });
+                physicsEnabled = on;
+                if (physBtn && physBtn.children[0]) physBtn.children[0].text = on ? "Disable Physics" : "Enable Physics";
+              }
 
-              makeBtn("Exit VR", "#4c1d1d", "#7f1d1d", "#fca5a5", async () => {
-                try { await xr.baseExperience.exitXRAsync(); } catch(e) {}
-              });
+              const buttons = [
+                { label: "Reset Position", onClick: () => {
+                  const pos = vrSpawnPositions();
+                  mesh.position = pos.mesh;
+                  vrHelpPlane.position = pos.panel;
+                  if (mesh.rotationQuaternion) mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+                  else mesh.rotation = BABYLON.Vector3.Zero();
+                  normalizeModelSize(mesh, modelSize);
+                } },
+                { label: "Scale +", onClick: () => mesh.scaling.scaleInPlace(1.25) },
+                { label: "Scale -", onClick: () => mesh.scaling.scaleInPlace(0.8) },
+                { label: "Rotate 45°", onClick: () => rotateMeshY(mesh, Math.PI / 4) },
+              ];
+
+              if (nextModelOption()) {
+                let loading = false;
+                buttons.push({ label: "Next Model", onClick: async (btn) => {
+                  const next = nextModelOption();
+                  if (loading || !next) return;
+                  loading = true;
+                  const label = btn.children[0];
+                  if (label) label.text = "Loading…";
+                  try {
+                    if (physicsEnabled) setPhysics(false);
+                    const pos = mesh.position.clone();
+                    const newRoot = await replaceModel(next.value);
+                    if (newRoot) {
+                      mesh = newRoot;
+                      normalizeModelSize(mesh, modelSize);
+                      mesh.position = pos;
+                      attachGrabBehaviors(mesh);
+                      document.getElementById("model-select").value = next.value;
+                    }
+                  } catch (e) { console.error("Model switch failed:", e); }
+                  if (label) label.text = "Next Model";
+                  loading = false;
+                } });
+              }
+
+              if (isVR) {
+                buttons.push({ label: "Enable Physics", bg: "#163316", hoverBg: "#1f4d1f", color: "#86efac",
+                  onClick: (btn) => { physBtn = btn; setPhysics(!physicsEnabled); } });
+              }
+
+              buttons.push({ label: isVR ? "Exit VR" : "Exit Passthrough", bg: "#4c1d1d", hoverBg: "#7f1d1d", color: "#fca5a5",
+                onClick: async () => { try { await xr.baseExperience.exitXRAsync(); } catch(e) {} } });
+
+              const lines = ["Move: Grip & drag", "Rotate: Right stick", "Scale: Both grips"];
+              if (isVR) lines.push("Teleport: Left stick");
+              vrHelpPlane = createHeadsetPanel(isVR ? "VR Controls" : "Passthrough Controls", lines, buttons);
+              vrHelpPlane.position = spawnPos.panel;
             }
-
           } else {
             // ── AR MODE ──
             const arExitEl = document.getElementById("ar-exit-btn");
@@ -660,18 +759,21 @@ async function setupXR(scene) {
 
         } else {
           // Session ending — tear down all per-session observers
+          // Drop drag/scale behaviors so the next session starts clean
+          const root = getModelRoot();
+          if (root) clearBehaviors(root);
           if (followObserver) { scene.onBeforeRenderObservable.remove(followObserver); followObserver = null; }
           if (placeTapObserver) { scene.onPointerObservable.remove(placeTapObserver); placeTapObserver = null; }
           if (twistObserver) { scene.onPointerObservable.remove(twistObserver); twistObserver = null; }
-          if (isVR) disposeVROverlays(); else disposeARSession();
+          if (usesHeadsetPanel) disposeVROverlays(); else disposeARSession();
           if (xrInfo) xrInfo.classList.remove("active");
           if (placementGuide) placementGuide.classList.remove("active");
           if (isVR) scene.clearColor = new BABYLON.Color4(0.4, 0.0, 0.6, 1.0);
         }
       });
 
-      // AR uses "local" — phones don't support "local-floor" for AR sessions
-      const refSpace = isVR ? "local-floor" : "local";
+      // Phone AR uses "local" — phones don't support "local-floor" for AR sessions
+      const refSpace = usesHeadsetPanel ? "local-floor" : "local";
       await xr.baseExperience.enterXRAsync(selectedSessionMode, refSpace);
     } catch (err) {
       console.error("XR failed:", err);
